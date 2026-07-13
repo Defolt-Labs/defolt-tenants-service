@@ -1,0 +1,51 @@
+when:
+  - event: push
+    branch: staging
+  - event: tag
+
+steps:
+  - name: build-image
+    when:
+      event: push
+    image: gcr.io/kaniko-project/executor:debug
+    environment:
+      REGISTRY_USER:
+        from_secret: registry_username
+      REGISTRY_PASS:
+        from_secret: registry_password
+    commands:
+      - mkdir -p /kaniko/.docker
+      - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
+      - printf '{"auths":{"registry.uat.defoltlabs.com":{"auth":"%s"}}}' "$AUTH" > /kaniko/.docker/config.json
+      - >-
+        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_PIPELINE_NUMBER} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:latest --digest-file=/kaniko/digest-file
+
+  - name: upload-values
+    when:
+      event: push
+    image: appleboy/drone-scp
+    settings:
+      host: { from_secret: server_host }
+      username: devops
+      key: { from_secret: ssh_key }
+      source: charts/values.yaml
+      target: /tmp/${CI_REPO_NAME}-${CI_PIPELINE_NUMBER}
+      overwrite: true
+
+  - name: deploy-uat
+    when:
+      event: push
+    image: appleboy/drone-ssh
+    settings:
+      host: { from_secret: server_host }
+      username: devops
+      key: { from_secret: ssh_key }
+      script:
+        - export KUBECONFIG=/home/devops/.kube/config
+        - helm upgrade --install ${CI_REPO_NAME} /opt/defolt/charts/defolt-service
+            --namespace defolt-platform
+            --create-namespace
+            --values /tmp/${CI_REPO_NAME}-${CI_PIPELINE_NUMBER}/charts/values.yaml
+            --set image.tag=${CI_PIPELINE_NUMBER}
+            --wait --timeout 3m
+        - rm -rf /tmp/${CI_REPO_NAME}-${CI_PIPELINE_NUMBER}

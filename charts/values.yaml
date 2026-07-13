@@ -1,0 +1,47 @@
+# defolt-tenants-service: Tier 1 shared tenant registry. Fronts the
+# fleet-wide multi-tenant SaaS story per MULTI_TENANT_PLAN.md §5.1.
+name: defolt-tenants-service
+namespace: defolt-platform
+
+image:
+  repository: registry.uat.defoltlabs.com/defolt-tenants-service
+  tag: latest
+
+port: 8080
+
+env:
+  SERVER_PORT: "8080"
+  DB_HOST: defolt-postgres
+  DB_PORT: "5432"
+  DB_NAME: defolt_tenants
+  DB_USER: defolt_tenants
+  DB_SSLMODE: disable
+  NATS_URL: nats://defolt-nats:4222
+  REDIS_URL: redis://defolt-redis:6379
+  AUTO_MIGRATE: "true"
+  # Comma-separated list of slugs the registry refuses to allocate.
+  # Reserved to avoid collisions with fleet-internal subdomains.
+  RESERVED_SLUGS: "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants"
+
+envFile:
+  enabled: true
+  secretName: defolt-env
+
+# Plan §5.13: 3 replicas + PodDisruptionBudget = minAvailable 2. HA
+# is load-bearing because every subdomain resolution hits this service.
+autoscaling:
+  enabled: false
+replicas: 3
+
+ingress:
+  host: defolt.api.uat.defoltlabs.com
+  pathPrefix: /tenants
+  stripPrefix: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: "500m"
+    memory: 256Mi
