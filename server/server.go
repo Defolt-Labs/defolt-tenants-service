@@ -40,7 +40,9 @@ func Initialize() (*App, error) {
 
 	repo := repository.New(db)
 	svc := service.New(repo, nc, cfg.ReservedSlugs)
-	h := handler.New(svc, cfg.ServiceVersion)
+	ts := service.NewTurnstile(cfg.TurnstileSecret)
+	idClient := service.NewIdentityClient(cfg.IdentityURL, cfg.InternalServiceKey, cfg.DefaultPlatform)
+	h := handler.New(svc, ts, idClient, cfg.ServiceVersion)
 
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -57,6 +59,7 @@ func Initialize() (*App, error) {
 	pub := engine.Group("/api/v1")
 	{
 		pub.GET("/tenants/by-slug/:slug", h.GetBySlug)
+		pub.POST("/public/signup", h.PublicSignup)
 	}
 
 	// Internal service-to-service admin routes.
@@ -67,6 +70,7 @@ func Initialize() (*App, error) {
 		internal.POST("/tenants/:id/suspend", h.Suspend)
 		internal.POST("/tenants/:id/restore", h.Restore)
 		internal.GET("/tenants/:id/health", h.TenantHealth)
+		internal.POST("/internal/tenants/:id/activate", h.Activate)
 	}
 
 	// Traefik forward-auth entry point. Public because Traefik is the

@@ -30,6 +30,11 @@ type Config struct {
 	// Comma-separated env value; defaults cover the fleet's public
 	// subdomains (www, api, admin, staff, ci, grafana, docs).
 	ReservedSlugs []string
+
+	// Public signup wiring.
+	TurnstileSecret string
+	IdentityURL     string
+	DefaultPlatform string
 }
 
 func Load() (*Config, error) {
@@ -77,6 +82,10 @@ func Load() (*Config, error) {
 
 		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),
 		ReservedSlugs: reserved,
+
+		TurnstileSecret: getStr("TURNSTILE_SECRET", ""),
+		IdentityURL:     getStr("DEFOLT_IDENTITY_URL", "http://defolt-identity-service:8080"),
+		DefaultPlatform: getStr("DEFAULT_PLATFORM", "drs"),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
