@@ -37,6 +37,7 @@ steps:
       event: push
     image: appleboy/drone-ssh
     settings:
+      script_stop: true
       host: { from_secret: server_host }
       username: devops
       key: { from_secret: ssh_key }
