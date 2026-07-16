@@ -27,7 +27,7 @@ env:
 
 envFile:
   enabled: true
-  secretName: defolt-env
+  secretName: platform-env
 
 # Plan §5.13: 3 replicas + PodDisruptionBudget = minAvailable 2. HA
 # is load-bearing because every subdomain resolution hits this service.
