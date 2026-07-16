@@ -81,7 +81,9 @@ func Load() (*Config, error) {
 		ConnMaxLifetime: time.Duration(getInt("DB_CONN_MAX_LIFETIME_MIN", 15)) * time.Minute,
 
 		NatsURL:            getStr("NATS_URL", "nats://defolt-nats:4222"),
-		InternalServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", ""),
+		// Falls back to the cluster-wide INTERNAL_SERVICE_KEY already in
+		// platform-env; billing and identity verify against that same value.
+		InternalServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
 		AutoMigrate:        getBool("AUTO_MIGRATE", true),
 
 		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),
