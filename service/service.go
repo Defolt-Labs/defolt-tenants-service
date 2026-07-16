@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
+	"defolt-tenants-service/cache"
+	"defolt-tenants-service/logger"
 	"defolt-tenants-service/model"
 	"defolt-tenants-service/repository"
 
@@ -20,6 +23,8 @@ var (
 	ErrSlugReserved = errors.New("slug is reserved")
 	ErrSlugTaken    = errors.New("slug is taken")
 	ErrValidation   = errors.New("validation failed")
+	ErrNoOwner      = errors.New("tenant has no resolvable owner user")
+	ErrBillingDown  = errors.New("billing service unavailable")
 )
 
 // slugRegex mirrors plan §4.9: 3-32 chars, starts with a letter, ends
@@ -29,15 +34,18 @@ var slugRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}[a-z0-9]$`)
 type TenantsService struct {
 	repo     *repository.Repo
 	nc       *nats.Conn
+	cache    *cache.Cache
+	identity *IdentityClient
+	billing  *BillingClient
 	reserved map[string]struct{}
 }
 
-func New(repo *repository.Repo, nc *nats.Conn, reserved []string) *TenantsService {
+func New(repo *repository.Repo, nc *nats.Conn, c *cache.Cache, identity *IdentityClient, billing *BillingClient, reserved []string) *TenantsService {
 	set := make(map[string]struct{}, len(reserved))
 	for _, r := range reserved {
 		set[strings.ToLower(strings.TrimSpace(r))] = struct{}{}
 	}
-	return &TenantsService{repo: repo, nc: nc, reserved: set}
+	return &TenantsService{repo: repo, nc: nc, cache: c, identity: identity, billing: billing, reserved: set}
 }
 
 // CreateInput mirrors the POST /api/v1/tenants body. Product defaults
@@ -82,20 +90,36 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 		return nil, err
 	}
 	s.emit("tenant.created", map[string]any{
-		"tenant_id":     t.ID,
-		"slug":          t.Slug,
-		"owner_email":   t.ContactEmail,
-		"product":       t.Product,
-		"state":         string(t.Status),
+		"tenant_id":   t.ID,
+		"slug":        t.Slug,
+		"owner_email": t.ContactEmail,
+		"product":     t.Product,
+		"state":       string(t.Status),
 	})
 	return t, nil
 }
 
 // ResolveBySlug is the hot-path lookup called by Traefik forward auth
-// on every request. Returns the tenant or ErrNotFound. Redis caching
-// wraps this at the handler layer.
-func (s *TenantsService) ResolveBySlug(ctx context.Context, slug string) (*model.Tenant, error) {
-	return s.repo.FindBySlug(ctx, slug)
+// on every request. Tries the shared Redis cache first (30s TTL, plan
+// §5.3/§5.13); on miss reads Postgres and repopulates the cache.
+// Returns the slim projection — the only shape the hot path needs.
+func (s *TenantsService) ResolveBySlug(ctx context.Context, slug string) (*model.TenantSlim, error) {
+	slug = strings.ToLower(strings.TrimSpace(slug))
+	if b, ok := s.cache.GetSlug(ctx, slug); ok {
+		var slim model.TenantSlim
+		if err := json.Unmarshal(b, &slim); err == nil {
+			return &slim, nil
+		}
+	}
+	t, err := s.repo.FindBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	slim := t.Slim()
+	if b, err := json.Marshal(slim); err == nil {
+		s.cache.SetSlug(ctx, slug, b)
+	}
+	return &slim, nil
 }
 
 // Get by UUID.
@@ -103,8 +127,52 @@ func (s *TenantsService) Get(ctx context.Context, id uuid.UUID) (*model.Tenant, 
 	return s.repo.FindByID(ctx, id)
 }
 
+// UpdateInput carries the PATCH /api/v1/tenants/:id body. Nil fields
+// stay untouched.
+type UpdateInput struct {
+	Name         *string
+	ContactEmail *string
+	Plan         *string
+}
+
+// Update mutates the editable tenant fields, invalidates the slug
+// cache and emits `tenant.updated`.
+func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*model.Tenant, error) {
+	t, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	changed := false
+	if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
+		t.Name = strings.TrimSpace(*in.Name)
+		changed = true
+	}
+	if in.ContactEmail != nil && strings.TrimSpace(*in.ContactEmail) != "" {
+		t.ContactEmail = strings.TrimSpace(*in.ContactEmail)
+		changed = true
+	}
+	if in.Plan != nil && strings.TrimSpace(*in.Plan) != "" {
+		t.Plan = strings.TrimSpace(*in.Plan)
+		changed = true
+	}
+	if !changed {
+		return t, nil
+	}
+	if err := s.repo.Save(ctx, t); err != nil {
+		return nil, err
+	}
+	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.emit("tenant.updated", map[string]any{
+		"tenant_id": t.ID,
+		"slug":      t.Slug,
+		"plan":      t.Plan,
+	})
+	return t, nil
+}
+
 // Suspend moves a tenant into `suspended`. Emits `tenant.status_changed`
-// so every cluster-local Redis cache invalidates within the same tick.
+// plus the distinct `tenant.suspended` subject, and drops the shared
+// Redis cache entry so every replica sees the new state within a tick.
 func (s *TenantsService) Suspend(ctx context.Context, id uuid.UUID) (*model.Tenant, error) {
 	if err := s.repo.SetStatus(ctx, id, model.StatusSuspended); err != nil {
 		return nil, err
@@ -113,11 +181,14 @@ func (s *TenantsService) Suspend(ctx context.Context, id uuid.UUID) (*model.Tena
 	if err != nil {
 		return nil, err
 	}
-	s.emit("tenant.status_changed", map[string]any{
+	s.cache.InvalidateSlug(ctx, t.Slug)
+	payload := map[string]any{
 		"tenant_id": t.ID,
 		"slug":      t.Slug,
 		"status":    string(t.Status),
-	})
+	}
+	s.emit("tenant.status_changed", payload)
+	s.emit("tenant.suspended", payload)
 	return t, nil
 }
 
@@ -130,11 +201,14 @@ func (s *TenantsService) Restore(ctx context.Context, id uuid.UUID) (*model.Tena
 	if err != nil {
 		return nil, err
 	}
-	s.emit("tenant.status_changed", map[string]any{
+	s.cache.InvalidateSlug(ctx, t.Slug)
+	payload := map[string]any{
 		"tenant_id": t.ID,
 		"slug":      t.Slug,
 		"status":    string(t.Status),
-	})
+	}
+	s.emit("tenant.status_changed", payload)
+	s.emit("tenant.restored", payload)
 	return t, nil
 }
 
@@ -157,6 +231,7 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	if err := s.repo.Save(ctx, t); err != nil {
 		return nil, err
 	}
+	s.cache.InvalidateSlug(ctx, t.Slug)
 	s.emit("tenant.activated", map[string]any{
 		"tenant_id":       t.ID,
 		"slug":            t.Slug,
@@ -166,9 +241,67 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	return t, nil
 }
 
-// SweepAbandoned runs on a cron and hard-deletes tenants stuck in
-// `pending_payment` past the 24-hour threshold. Publishes
-// `tenant.abandoned` per §5.11 so downstream cleanups fire.
+// ReissueOwnerOTP generates a fresh one-time password for the tenant's
+// Store Admin and pushes it to identity's internal reset-password
+// endpoint. When owner_user_id was never stored (old rows, identity
+// hiccup at signup) it is backfilled via identity's by-email lookup.
+func (s *TenantsService) ReissueOwnerOTP(ctx context.Context, id uuid.UUID) (string, error) {
+	t, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if t.OwnerUserID == nil {
+		email := t.OwnerEmail
+		if email == "" {
+			email = t.ContactEmail
+		}
+		if email == "" || s.identity == nil {
+			return "", ErrNoOwner
+		}
+		userID, err := s.identity.FindUserIDByEmail(ctx, email)
+		if err != nil {
+			logger.LogWarn("", "reissue-otp", fmt.Sprintf("tenant=%s by-email lookup failed: %v", t.ID, err))
+			return "", ErrNoOwner
+		}
+		t.OwnerUserID = userID
+		if t.OwnerEmail == "" {
+			t.OwnerEmail = email
+		}
+		if err := s.repo.Save(ctx, t); err != nil {
+			return "", err
+		}
+	}
+	password := generatePassword()
+	if err := s.identity.ResetPassword(ctx, *t.OwnerUserID, password); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+// ResendPaymentLink asks billing for a fresh Selcom checkout URL for
+// a tenant still stuck in pending_payment.
+func (s *TenantsService) ResendPaymentLink(ctx context.Context, id uuid.UUID) (*CheckoutResult, error) {
+	t, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	email := t.OwnerEmail
+	if email == "" {
+		email = t.ContactEmail
+	}
+	res, err := s.billing.CreateCheckout(ctx, t.ID, email)
+	if err != nil {
+		logger.LogWarn("", "resend-payment-link", fmt.Sprintf("tenant=%s: %v", t.ID, err))
+		return nil, ErrBillingDown
+	}
+	return res, nil
+}
+
+// SweepAbandoned runs on the 15-minute ticker and hard-deletes tenants
+// stuck in `pending_payment` past the 24-hour threshold. Publishes
+// `tenant.abandoned` per §5.11 so downstream cleanups fire, and
+// best-effort deletes the orphaned Store Admin in identity when
+// owner_user_id was stored (old rows without it are skipped silently).
 func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 	rows, err := s.repo.ListPendingCleanup(ctx, 24)
 	if err != nil {
@@ -178,6 +311,12 @@ func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 	for _, t := range rows {
 		if err := s.repo.HardDelete(ctx, t.ID); err != nil {
 			continue
+		}
+		s.cache.InvalidateSlug(ctx, t.Slug)
+		if t.OwnerUserID != nil && s.identity != nil {
+			if err := s.identity.DeleteUser(ctx, *t.OwnerUserID); err != nil {
+				logger.LogWarn("", "sweep-abandoned", fmt.Sprintf("tenant=%s identity delete failed: %v", t.ID, err))
+			}
 		}
 		s.emit("tenant.abandoned", map[string]any{
 			"tenant_id": t.ID,

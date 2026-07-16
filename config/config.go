@@ -35,6 +35,10 @@ type Config struct {
 	TurnstileSecret string
 	IdentityURL     string
 	DefaultPlatform string
+
+	// BillingURL points at defolt-billing-service for the internal
+	// registration-checkout call (§5.11).
+	BillingURL string
 }
 
 func Load() (*Config, error) {
@@ -54,7 +58,7 @@ func Load() (*Config, error) {
 		}
 	}
 
-	reserved := strings.Split(getStr("RESERVED_SLUGS", "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing"), ",")
+	reserved := strings.Split(getStr("RESERVED_SLUGS", "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,drs,mt,uat"), ",")
 	for i, r := range reserved {
 		reserved[i] = strings.TrimSpace(r)
 	}
@@ -86,6 +90,8 @@ func Load() (*Config, error) {
 		TurnstileSecret: getStr("TURNSTILE_SECRET", ""),
 		IdentityURL:     getStr("DEFOLT_IDENTITY_URL", "http://defolt-identity-service:8080"),
 		DefaultPlatform: getStr("DEFAULT_PLATFORM", "drs"),
+
+		BillingURL: getStr("DEFOLT_BILLING_URL", "http://defolt-billing-service:8080"),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err

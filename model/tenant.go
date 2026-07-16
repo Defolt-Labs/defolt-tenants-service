@@ -51,6 +51,14 @@ type Tenant struct {
 	Plan   string       `gorm:"size:32;default:'standard'" json:"plan"`
 	Status TenantStatus `gorm:"size:32;default:'pending_payment';index" json:"status"`
 
+	// OwnerUserID / OwnerEmail identify the initial Store Admin created
+	// in defolt-identity during public signup (§5.11). OwnerUserID is
+	// nullable: rows created before this column existed, and signups
+	// where the identity call failed, leave it nil. The reissue-OTP
+	// endpoint backfills it lazily via identity's by-email lookup.
+	OwnerUserID *uuid.UUID `gorm:"type:uuid" json:"owner_user_id,omitempty"`
+	OwnerEmail  string     `gorm:"size:180" json:"owner_email,omitempty"`
+
 	// TrialStartsAt / TrialEndsAt bracket the 7-day free window that
 	// unlocks on registration-payment confirmation. Filled in by the
 	// billing consumer's `tenant.activated` handler.
@@ -60,6 +68,21 @@ type Tenant struct {
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// TenantSlim is the public projection of a tenant: exactly the fields
+// the anonymous by-slug lookup and Traefik forward auth need, nothing
+// else (no contact email, no timestamps). This is also the shape
+// cached in Redis under `tenant:slug:<slug>`.
+type TenantSlim struct {
+	ID      uuid.UUID    `json:"id"`
+	Slug    string       `json:"slug"`
+	Status  TenantStatus `json:"status"`
+	Product string       `json:"product"`
+}
+
+func (t *Tenant) Slim() TenantSlim {
+	return TenantSlim{ID: t.ID, Slug: t.Slug, Status: t.Status, Product: t.Product}
 }
 
 func (t *Tenant) BeforeCreate(_ *gorm.DB) error {

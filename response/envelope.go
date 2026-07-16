@@ -57,6 +57,14 @@ var (
 		Code string
 		Meta Meta
 	}{"DL_TENANT_HEALTHY", Meta{EN: "Tenant healthy.", SW: "Mtu yuko sawa."}}
+	OKTenantOTPReissued = struct {
+		Code string
+		Meta Meta
+	}{"DL_TENANT_OTP_REISSUED", Meta{EN: "One-time password reissued.", SW: "Nenosiri la mara moja limetolewa upya."}}
+	OKTenantPaymentLink = struct {
+		Code string
+		Meta Meta
+	}{"DL_TENANT_PAYMENT_LINK", Meta{EN: "Payment link issued.", SW: "Kiungo cha malipo kimetolewa."}}
 	OKHealth = struct {
 		Code string
 		Meta Meta
@@ -86,6 +94,14 @@ var (
 		Code string
 		Meta Meta
 	}{"DL_TENANT_SUSPENDED", Meta{EN: "This tenant is suspended.", SW: "Mtu huyu amesimamishwa."}}
+	ErrTenantNoOwner = struct {
+		Code string
+		Meta Meta
+	}{"DL_TENANT_NO_OWNER", Meta{EN: "No owner account could be resolved for this tenant.", SW: "Akaunti ya mmiliki haikupatikana kwa mteja huyu."}}
+	ErrBillingUnavailable = struct {
+		Code string
+		Meta Meta
+	}{"DL_BILLING_UNAVAILABLE", Meta{EN: "Billing is unavailable right now. Try again shortly.", SW: "Huduma ya malipo haipatikani kwa sasa. Jaribu tena baadaye."}}
 	ErrInternal = struct {
 		Code string
 		Meta Meta

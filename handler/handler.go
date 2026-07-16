@@ -1,33 +1,78 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
+	"defolt-tenants-service/cache"
 	"defolt-tenants-service/middleware"
 	"defolt-tenants-service/model"
 	"defolt-tenants-service/repository"
 	"defolt-tenants-service/response"
 	"defolt-tenants-service/service"
+	"defolt-tenants-service/static"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 type Handlers struct {
-	svc      *service.TenantsService
-	ts       *service.Turnstile
-	identity *service.IdentityClient
-	version  string
+	svc     *service.TenantsService
+	ts      *service.Turnstile
+	cache   *cache.Cache
+	version string
 }
 
-func New(svc *service.TenantsService, ts *service.Turnstile, id *service.IdentityClient, version string) *Handlers {
-	return &Handlers{svc: svc, ts: ts, identity: id, version: version}
+func New(svc *service.TenantsService, ts *service.Turnstile, c *cache.Cache, version string) *Handlers {
+	return &Handlers{svc: svc, ts: ts, cache: c, version: version}
 }
 
 // Health is the /health + /ready probe reply.
 func (h *Handlers) Health(c *gin.Context) {
 	response.OK(c, response.OKHealth.Code, response.OKHealth.Meta, gin.H{"version": h.version})
+}
+
+// ---------- Idempotency-Key support (plan §5.19) ----------
+// Best effort via Redis: replay of a stored key returns the original
+// success body with HTTP 200; if Redis is down the request processes
+// normally.
+
+func idemKey(c *gin.Context) string {
+	k := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if k == "" {
+		return ""
+	}
+	return "idem:tenants:" + k
+}
+
+// replayIdempotent returns true when a stored response was replayed.
+func (h *Handlers) replayIdempotent(c *gin.Context) bool {
+	key := idemKey(c)
+	if key == "" {
+		return false
+	}
+	if body, ok := h.cache.GetIdempotent(c.Request.Context(), key); ok {
+		c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+		return true
+	}
+	return false
+}
+
+// respondCreatedIdempotent writes the 201 envelope and, when an
+// Idempotency-Key is present, stores the serialized body for replay.
+func (h *Handlers) respondCreatedIdempotent(c *gin.Context, code string, meta response.Meta, data any) {
+	env := response.Envelope{Code: code, Meta: meta, Data: data}
+	body, err := json.Marshal(env)
+	if err != nil {
+		response.Created(c, code, meta, data)
+		return
+	}
+	if key := idemKey(c); key != "" {
+		h.cache.StoreIdempotent(c.Request.Context(), key, body)
+	}
+	c.Data(http.StatusCreated, "application/json; charset=utf-8", body)
 }
 
 // ---------- POST /api/v1/tenants (X-Internal-Service-Key) ----------
@@ -44,6 +89,9 @@ type createBody struct {
 }
 
 func (h *Handlers) Create(c *gin.Context) {
+	if h.replayIdempotent(c) {
+		return
+	}
 	var body createBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
@@ -72,13 +120,16 @@ func (h *Handlers) Create(c *gin.Context) {
 		}
 		return
 	}
-	response.Created(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, t)
+	h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, t)
 }
 
 // ---------- GET /api/v1/tenants/by-slug/:slug (public, rate-limited) ----------
 
 func (h *Handlers) GetBySlug(c *gin.Context) {
 	slug := c.Param("slug")
+	// Public endpoint returns the slim projection — never expose the
+	// full tenant record (contact email, timestamps) to anonymous
+	// callers. Redis fronts this lookup with a 30s TTL.
 	t, err := h.svc.ResolveBySlug(c, slug)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -88,19 +139,10 @@ func (h *Handlers) GetBySlug(c *gin.Context) {
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
-	// Public endpoint returns a slim projection — never expose the
-	// full tenant record (contact email, timestamps) to anonymous
-	// callers. Traefik forward auth uses this and only needs id +
-	// status + product.
-	response.OK(c, response.OKTenant.Code, response.OKTenant.Meta, gin.H{
-		"id":      t.ID,
-		"slug":    t.Slug,
-		"status":  t.Status,
-		"product": t.Product,
-	})
+	response.OK(c, response.OKTenant.Code, response.OKTenant.Meta, t)
 }
 
-// ---------- GET /api/v1/tenants/:id (JWT — internal for now) ----------
+// ---------- GET /api/v1/tenants/:id (X-Internal-Service-Key) ----------
 
 func (h *Handlers) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -118,6 +160,41 @@ func (h *Handlers) Get(c *gin.Context) {
 		return
 	}
 	response.OK(c, response.OKTenant.Code, response.OKTenant.Meta, t)
+}
+
+// ---------- PATCH /api/v1/tenants/:id ----------
+
+type patchBody struct {
+	Name         *string `json:"name"`
+	ContactEmail *string `json:"contact_email" binding:"omitempty,email"`
+	Plan         *string `json:"plan"`
+}
+
+func (h *Handlers) Patch(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "invalid id")
+		return
+	}
+	var body patchBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
+		return
+	}
+	t, err := h.svc.Update(c, id, service.UpdateInput{
+		Name:         body.Name,
+		ContactEmail: body.ContactEmail,
+		Plan:         body.Plan,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
+			return
+		}
+		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
+		return
+	}
+	response.OK(c, response.OKTenantUpdated.Code, response.OKTenantUpdated.Meta, t)
 }
 
 // ---------- POST /api/v1/tenants/:id/suspend ----------
@@ -160,6 +237,62 @@ func (h *Handlers) Restore(c *gin.Context) {
 	response.OK(c, response.OKTenantRestored.Code, response.OKTenantRestored.Meta, t)
 }
 
+// ---------- POST /api/v1/tenants/:id/reissue-owner-otp ----------
+// Generates a fresh one-time password for the Store Admin and pushes
+// it through identity's internal reset-password endpoint.
+
+func (h *Handlers) ReissueOwnerOTP(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "invalid id")
+		return
+	}
+	otp, err := h.svc.ReissueOwnerOTP(c.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
+		case errors.Is(err, service.ErrNoOwner):
+			response.Conflict(c, response.ErrTenantNoOwner.Code, response.ErrTenantNoOwner.Meta, nil)
+		default:
+			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
+		}
+		return
+	}
+	response.OK(c, response.OKTenantOTPReissued.Code, response.OKTenantOTPReissued.Meta, gin.H{
+		"one_time_password": otp,
+	})
+}
+
+// ---------- POST /api/v1/tenants/:id/resend-payment-link ----------
+
+func (h *Handlers) ResendPaymentLink(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "invalid id")
+		return
+	}
+	checkout, err := h.svc.ResendPaymentLink(c.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
+		case errors.Is(err, service.ErrBillingDown):
+			c.JSON(http.StatusServiceUnavailable, response.Envelope{
+				Code: response.ErrBillingUnavailable.Code,
+				Meta: response.ErrBillingUnavailable.Meta,
+			})
+		default:
+			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
+		}
+		return
+	}
+	response.OK(c, response.OKTenantPaymentLink.Code, response.OKTenantPaymentLink.Meta, gin.H{
+		"payment_url": checkout.PaymentURL,
+		"amount_tzs":  checkout.AmountTZS,
+	})
+}
+
 // ---------- GET /api/v1/tenants/:id/health ----------
 // Rollup of "is this tenant still live and paid". Consumers include
 // the SPA topbar's tenant status pill.
@@ -199,12 +332,15 @@ type signupBody struct {
 }
 
 func (h *Handlers) PublicSignup(c *gin.Context) {
+	if h.replayIdempotent(c) {
+		return
+	}
 	var body signupBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
 		return
 	}
-	t, err := h.svc.PublicSignup(c.Request.Context(), service.SignupInput{
+	res, err := h.svc.PublicSignup(c.Request.Context(), service.SignupInput{
 		Slug:         body.Slug,
 		Name:         body.Name,
 		ContactEmail: body.ContactEmail,
@@ -213,7 +349,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		CountryCode:  body.CountryCode,
 		TurnstileTok: body.TurnstileTok,
 		ClientIP:     c.ClientIP(),
-	}, h.ts, h.identity)
+	}, h.ts)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTurnstile):
@@ -229,15 +365,18 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		}
 		return
 	}
-	response.Created(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, gin.H{
-		"id":   t.ID,
-		"slug": t.Slug,
-		"status": t.Status,
+	h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, gin.H{
+		"id":                res.Tenant.ID,
+		"slug":              res.Tenant.Slug,
+		"status":            res.Tenant.Status,
+		"one_time_password": res.OneTimePassword,
+		"payment_url":       res.PaymentURL,
+		"amount_tzs":        res.AmountTZS,
 	})
 }
 
 // ---------- POST /api/v1/internal/tenants/:id/activate (billing→tenants) ----------
-// Called by drs-billing when the registration invoice is paid.
+// Called by defolt-billing when the registration invoice is paid.
 func (h *Handlers) Activate(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -254,6 +393,35 @@ func (h *Handlers) Activate(c *gin.Context) {
 		return
 	}
 	response.OK(c, response.OKTenantRestored.Code, response.OKTenantRestored.Meta, t)
+}
+
+// ---------- GET /public/<page>.html + /public/landing/:page (plan §5.17) ----------
+// Lifecycle landing pages Traefik points unresolved / suspended /
+// pending hosts at. Served from the embedded FS, allowlisted.
+func (h *Handlers) LandingPage(c *gin.Context) {
+	h.serveLandingPage(c, c.Param("page"))
+}
+
+// LandingPageNamed pins a handler to one specific page for the
+// explicit /public/<page>.html routes.
+func (h *Handlers) LandingPageNamed(page string) gin.HandlerFunc {
+	return func(c *gin.Context) { h.serveLandingPage(c, page) }
+}
+
+func (h *Handlers) serveLandingPage(c *gin.Context, page string) {
+	page = strings.TrimSuffix(page, ".html")
+	file, ok := static.Pages[page]
+	if !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	body, err := static.FS.ReadFile(file)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("Cache-Control", "public, max-age=300")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", body)
 }
 
 // ---------- POST /internal/resolve-host (Traefik forward auth) ----------
