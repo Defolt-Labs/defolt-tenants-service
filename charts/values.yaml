@@ -24,6 +24,9 @@ env:
   RESERVED_SLUGS: "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat"
   DEFOLT_IDENTITY_URL: http://defolt-identity-service:8080
   DEFOLT_BILLING_URL: http://defolt-billing-service:8080
+  # Login address rendered on the signup + suspended pages. Without this the
+  # code default (drs.defoltlabs.com) points UAT signups at production.
+  TENANT_BASE_DOMAIN: mt.drs.uat.defoltlabs.com
 
 envFile:
   enabled: true
