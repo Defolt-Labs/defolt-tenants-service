@@ -309,15 +309,23 @@ func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, t := range rows {
+		// Identity user first, tenant row second. The tenant row is the
+		// ONLY record of which identity user belongs to this signup, so
+		// dropping it before the owner is deleted strands that account
+		// permanently — and with it the email address, which then blocks
+		// the person from ever signing up again. Failing here leaves the
+		// whole tenant for the next tick to retry; the delete is
+		// idempotent, so retrying is free.
+		if t.OwnerUserID != nil && s.identity != nil {
+			if err := s.identity.DeleteUser(ctx, *t.OwnerUserID); err != nil {
+				logger.LogWarn("", "sweep-abandoned", fmt.Sprintf("tenant=%s identity delete failed, retrying next tick: %v", t.ID, err))
+				continue
+			}
+		}
 		if err := s.repo.HardDelete(ctx, t.ID); err != nil {
 			continue
 		}
 		s.cache.InvalidateSlug(ctx, t.Slug)
-		if t.OwnerUserID != nil && s.identity != nil {
-			if err := s.identity.DeleteUser(ctx, *t.OwnerUserID); err != nil {
-				logger.LogWarn("", "sweep-abandoned", fmt.Sprintf("tenant=%s identity delete failed: %v", t.ID, err))
-			}
-		}
 		s.emit("tenant.abandoned", map[string]any{
 			"tenant_id": t.ID,
 			"slug":      t.Slug,

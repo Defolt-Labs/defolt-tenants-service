@@ -108,8 +108,13 @@ func (r *Repo) SetStatus(ctx context.Context, id uuid.UUID, status model.TenantS
 // signups (plan §5.11).
 func (r *Repo) ListPendingCleanup(ctx context.Context, olderThanHours int) ([]model.Tenant, error) {
 	var out []model.Tenant
+	// make_interval(hours => ?) binds the threshold as the integer it is.
+	// The previous form, `(? || ' hours')::interval`, made pgx encode an
+	// int into a text-typed parameter and every sweep tick died with
+	// "unable to encode 24 into text format for text (OID 25)", so the
+	// abandoned-signup cleanup never ran at all.
 	err := r.db.WithContext(ctx).
-		Where("status = ? AND created_at < now() - (? || ' hours')::interval",
+		Where("status = ? AND created_at < now() - make_interval(hours => ?)",
 			model.StatusPendingPayment, olderThanHours).
 		Find(&out).Error
 	return out, err

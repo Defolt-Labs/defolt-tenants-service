@@ -109,16 +109,24 @@ func (c *IdentityClient) do(ctx context.Context, method, path string, body any) 
 	return raw, nil
 }
 
-// Register creates a defolt-identity user and returns the created
-// user's id parsed from the identity envelope (nil when the envelope
-// carries no id — the caller backfills lazily via FindUserIDByEmail).
-// Best-effort: if it fails, the caller decides whether to roll back
-// the tenant record.
-func (c *IdentityClient) Register(ctx context.Context, in RegisterInput) (*uuid.UUID, error) {
-	raw, err := c.do(ctx, http.MethodPost, "/api/v1/auth/register", map[string]any{
-		// camelCase: defolt-identity's RegisterRequest binds firstName /
-		// lastName, and both are `binding:"required"`, so snake_case keys
-		// bound to empty strings and failed validation.
+// CreateUser provisions the tenant owner in defolt-identity and
+// returns the created user's id.
+//
+// This deliberately does NOT use the public /api/v1/auth/register.
+// That route is a self-service EMAIL VERIFICATION flow: it parks a
+// pending registration in Redis, mails a link, and returns success
+// WITHOUT inserting a users row. Signup used to call it, so every
+// owner got a one-time password for an account that did not exist and
+// owner_user_id stayed NULL. The internal provisioning endpoint below
+// creates the row outright and is idempotent on email, so a signup
+// retry converges instead of failing.
+//
+// Identity is platform-oblivious: the payload carries no tenant or
+// product field. Owner linkage lives on the tenant row here.
+func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uuid.UUID, error) {
+	raw, err := c.do(ctx, http.MethodPost, "/api/v1/internal/admin/users", map[string]any{
+		// camelCase: identity binds firstName / lastName as required, so
+		// snake_case keys bind to empty strings and fail validation.
 		"email":     in.Email,
 		"firstName": in.FirstName,
 		"lastName":  in.LastName,
@@ -131,9 +139,13 @@ func (c *IdentityClient) Register(ctx context.Context, in RegisterInput) (*uuid.
 		Data identityUser `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, nil // user created; envelope shape unexpected — backfill later
+		return nil, fmt.Errorf("identity create-user: bad envelope: %w", err)
 	}
-	return env.Data.userID(), nil
+	id := env.Data.userID()
+	if id == nil {
+		return nil, fmt.Errorf("identity create-user: envelope missing user_id")
+	}
+	return id, nil
 }
 
 // FindUserIDByEmail resolves a user id via the internal admin lookup.
@@ -169,11 +181,16 @@ func (c *IdentityClient) ResetPassword(ctx context.Context, userID uuid.UUID, ne
 	return err
 }
 
-// DeleteUser removes an identity user. Used best-effort by the
-// abandoned-signup sweeper so orphaned Store Admin accounts do not
-// linger after their tenant is reaped.
+// DeleteUser removes an identity user. Used by the abandoned-signup
+// sweeper so orphaned Store Admin accounts — and the email addresses
+// they hold hostage — do not linger after their tenant is reaped.
+//
+// Identity archives the row into deleted_users (credentials scrubbed)
+// rather than dropping it, which frees the email for a fresh signup
+// while keeping the id resolvable for audit. The call is idempotent:
+// an already-absent user answers 200.
 func (c *IdentityClient) DeleteUser(ctx context.Context, userID uuid.UUID) error {
-	path := fmt.Sprintf("/api/v1/internal/admin/users/%s", userID)
+	path := fmt.Sprintf("/api/v1/internal/admin/users/%s?reason=tenant_signup_abandoned", userID)
 	_, err := c.do(ctx, http.MethodDelete, path, nil)
 	return err
 }

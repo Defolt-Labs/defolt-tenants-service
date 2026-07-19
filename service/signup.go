@@ -65,13 +65,14 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 
 	out := &SignupResult{Tenant: t}
 
-	// Store Admin registration. The generated temp password IS the
+	// Store Admin provisioning. The generated temp password IS the
 	// one-time password the owner logs in with, so it goes back in the
-	// signup response.
+	// signup response — which only means anything because CreateUser
+	// inserts a real, immediately loggable-in users row.
 	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
 	if s.identity != nil {
 		password := generatePassword()
-		userID, regErr := s.identity.Register(ctx, RegisterInput{
+		userID, regErr := s.identity.CreateUser(ctx, RegisterInput{
 			Email:     in.ContactEmail,
 			FirstName: in.FirstName,
 			LastName:  in.LastName,
