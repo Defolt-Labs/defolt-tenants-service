@@ -115,7 +115,7 @@ func (c *IdentityClient) do(ctx context.Context, method, path string, body any) 
 // Best-effort: if it fails, the caller decides whether to roll back
 // the tenant record.
 func (c *IdentityClient) Register(ctx context.Context, in RegisterInput) (*uuid.UUID, error) {
-	raw, err := c.do(ctx, http.MethodPost, "/auth/register", map[string]any{
+	raw, err := c.do(ctx, http.MethodPost, "/api/v1/auth/register", map[string]any{
 		"email":      in.Email,
 		"first_name": in.FirstName,
 		"last_name":  in.LastName,
