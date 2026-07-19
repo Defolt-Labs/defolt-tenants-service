@@ -116,10 +116,13 @@ func (c *IdentityClient) do(ctx context.Context, method, path string, body any) 
 // the tenant record.
 func (c *IdentityClient) Register(ctx context.Context, in RegisterInput) (*uuid.UUID, error) {
 	raw, err := c.do(ctx, http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"email":      in.Email,
-		"first_name": in.FirstName,
-		"last_name":  in.LastName,
-		"password":   in.Password,
+		// camelCase: defolt-identity's RegisterRequest binds firstName /
+		// lastName, and both are `binding:"required"`, so snake_case keys
+		// bound to empty strings and failed validation.
+		"email":     in.Email,
+		"firstName": in.FirstName,
+		"lastName":  in.LastName,
+		"password":  in.Password,
 	})
 	if err != nil {
 		return nil, err
