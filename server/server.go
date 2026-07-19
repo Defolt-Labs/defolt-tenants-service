@@ -61,7 +61,7 @@ func Initialize() (*App, error) {
 	idClient := service.NewIdentityClient(cfg.IdentityURL, cfg.InternalServiceKey, cfg.DefaultPlatform)
 	billing := service.NewBillingClient(cfg.BillingURL, cfg.InternalServiceKey)
 	svc := service.New(repo, nc, rc, idClient, billing, cfg.ReservedSlugs)
-	h := handler.New(svc, ts, rc, cfg.ServiceVersion)
+	h := handler.New(svc, ts, rc, cfg.ServiceVersion, cfg.TurnstileSiteKey, cfg.TenantBaseDomain)
 
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)

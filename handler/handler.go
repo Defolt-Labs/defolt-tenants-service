@@ -23,10 +23,21 @@ type Handlers struct {
 	ts      *service.Turnstile
 	cache   *cache.Cache
 	version string
+
+	// Values substituted into the embedded landing pages at serve time.
+	turnstileSiteKey string
+	tenantBaseDomain string
 }
 
-func New(svc *service.TenantsService, ts *service.Turnstile, c *cache.Cache, version string) *Handlers {
-	return &Handlers{svc: svc, ts: ts, cache: c, version: version}
+func New(svc *service.TenantsService, ts *service.Turnstile, c *cache.Cache, version, turnstileSiteKey, tenantBaseDomain string) *Handlers {
+	return &Handlers{
+		svc:              svc,
+		ts:               ts,
+		cache:            c,
+		version:          version,
+		turnstileSiteKey: turnstileSiteKey,
+		tenantBaseDomain: tenantBaseDomain,
+	}
 }
 
 // Health is the /health + /ready probe reply.
@@ -420,8 +431,20 @@ func (h *Handlers) serveLandingPage(c *gin.Context, page string) {
 		c.Status(http.StatusNotFound)
 		return
 	}
+	body = h.injectPageConfig(body)
 	c.Header("Cache-Control", "public, max-age=300")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", body)
+}
+
+// injectPageConfig substitutes the runtime config placeholders in an
+// embedded page. Pages that carry no placeholder come back unchanged,
+// and a page opened straight off disk still works because it falls
+// back to the placeholder-as-literal default in its own script.
+func (h *Handlers) injectPageConfig(body []byte) []byte {
+	out := string(body)
+	out = strings.ReplaceAll(out, "__TURNSTILE_SITE_KEY__", h.turnstileSiteKey)
+	out = strings.ReplaceAll(out, "__TENANT_BASE_DOMAIN__", h.tenantBaseDomain)
+	return []byte(out)
 }
 
 // ---------- POST /internal/resolve-host (Traefik forward auth) ----------

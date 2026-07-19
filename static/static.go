@@ -14,4 +14,5 @@ var Pages = map[string]string{
 	"not-registered":     "not-registered.html",
 	"suspended":          "suspended.html",
 	"pending-activation": "pending-activation.html",
+	"signup":             "signup.html",
 }
