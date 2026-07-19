@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/subtle"
 
+	"defolt-tenants-service/reqid"
 	"defolt-tenants-service/response"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +26,10 @@ func RequestID() gin.HandlerFunc {
 			id = "unknown-" + uuid.NewString()[:8]
 		}
 		c.Set("request_id", id)
+		// Also carry it on the request context: handlers pass
+		// c.Request.Context() down, and the outbound service clients
+		// must forward the ID or defolt-identity rejects the call.
+		c.Request = c.Request.WithContext(reqid.With(c.Request.Context(), id))
 		c.Writer.Header().Set(RequestIDHeader, id)
 		c.Next()
 	}

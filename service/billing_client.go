@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"defolt-tenants-service/reqid"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,6 +58,10 @@ func (c *BillingClient) CreateCheckout(ctx context.Context, tenantID uuid.UUID, 
 	req.Header.Set("Content-Type", "application/json")
 	if c.internalKey != "" {
 		req.Header.Set("X-Internal-Service-Key", c.internalKey)
+	}
+	// Same fleet requirement as the identity client: forward, never mint.
+	if rid := reqid.From(ctx); rid != "" {
+		req.Header.Set("X-Request-ID", rid)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

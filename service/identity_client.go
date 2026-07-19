@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"defolt-tenants-service/reqid"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -90,6 +91,11 @@ func (c *IdentityClient) do(ctx context.Context, method, path string, body any) 
 	req.Header.Set("X-Platform", c.platform)
 	if c.internalKey != "" {
 		req.Header.Set("X-Internal-Service-Key", c.internalKey)
+	}
+	// defolt-identity rejects every request without this header. Never
+	// generated here: the RequestID middleware already guarantees one.
+	if rid := reqid.From(ctx); rid != "" {
+		req.Header.Set("X-Request-ID", rid)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
