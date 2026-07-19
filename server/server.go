@@ -88,6 +88,14 @@ func Initialize() (*App, error) {
 	}
 	engine.GET("/public/landing/:page", h.LandingPage)
 
+	// Apex front door. The bare tenant domain (drs.defoltlabs.com, no
+	// slug) carries no tenant, so it never reaches forward auth: the
+	// apex Traefik route sends it straight here. Serving the marketing
+	// landing at "/" keeps the deep links on that host (/public/*.html,
+	// /api/v1/public/signup) working unrewritten, which the signup form
+	// needs — it posts to its own origin. See handoff.md §6.
+	engine.GET("/", h.LandingPageNamed(static.Landing))
+
 	// Internal service-to-service admin routes.
 	internal := engine.Group("/api/v1", middleware.InternalServiceKey(cfg.InternalServiceKey))
 	{

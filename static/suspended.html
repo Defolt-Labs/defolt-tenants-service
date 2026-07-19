@@ -36,7 +36,9 @@
 <main>
   <h1>Store suspended</h1>
   <p>This store is temporarily suspended. If you are the owner, settle the outstanding invoice to reactivate.</p>
-  <a class="cta" href="https://drs.defoltlabs.com">Go to drs.defoltlabs.com</a>
+  <!-- Base domain substituted at serve time (handler injectPageConfig),
+       so a UAT deploy links to the UAT apex instead of production. -->
+  <a class="cta" href="https://__TENANT_BASE_DOMAIN__">Go to __TENANT_BASE_DOMAIN__</a>
 </main>
 </body>
 </html>
