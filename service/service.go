@@ -13,6 +13,7 @@ import (
 	"defolt-tenants-service/logger"
 	"defolt-tenants-service/model"
 	"defolt-tenants-service/repository"
+	"defolt-tenants-service/reqid"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -303,6 +304,14 @@ func (s *TenantsService) ResendPaymentLink(ctx context.Context, id uuid.UUID) (*
 // best-effort deletes the orphaned Store Admin in identity when
 // owner_user_id was stored (old rows without it are skipped silently).
 func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
+	// The sweeper is a ticker, not a request: there is no inbound
+	// X-Request-ID to inherit, and defolt-identity rejects any call
+	// without one. So this is the one place that MINTS an ID rather
+	// than forwarding — it is the origin of its own trace, exactly like
+	// the RequestID middleware minting for a request that arrived
+	// without a header. Forwarding still applies everywhere else.
+	ctx = reqid.With(ctx, "sweep-"+uuid.NewString()[:8])
+
 	rows, err := s.repo.ListPendingCleanup(ctx, 24)
 	if err != nil {
 		return 0, err
