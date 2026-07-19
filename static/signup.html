@@ -166,7 +166,7 @@
           <div id="turnstile-widget"></div>
         </div>
 
-        <button id="submit-btn" class="cta" type="submit">Create store</button>
+        <button id="submit-btn" class="cta" type="submit">Create your store</button>
       </form>
     </div>
 
@@ -186,7 +186,7 @@
 
       <h2 style="margin-top:24px">Next steps</h2>
       <ol class="steps">
-        <li>Pay the registration of <span class="amount" id="amount-value"></span>.</li>
+        <li>Pay <span class="amount" id="amount-value"></span>.</li>
         <li>Wait for the payment confirmation. Your store is activated automatically once it clears.</li>
         <li>Sign in at <span class="address"><strong id="login-address"></strong></span> with your email and the one time password above.</li>
       </ol>
@@ -427,8 +427,13 @@
       otpNote.className = "hint bad";
     }
 
+    // The whole phrase lives here, not split across the markup: when the
+    // amount is missing the sentence still has to read as English. The
+    // old split produced "Pay the registration of the registration fee."
     var amount = formatAmount(data.amount_tzs);
-    document.getElementById("amount-value").textContent = amount || "the registration fee";
+    document.getElementById("amount-value").textContent = amount
+      ? "the registration fee of " + amount
+      : "the registration fee";
 
     var payLink = document.getElementById("pay-link");
     var payNote = document.getElementById("payment-missing-note");
@@ -516,7 +521,7 @@
       .then(function () {
         submitting = false;
         submitBtn.disabled = false;
-        submitBtn.textContent = "Create store";
+        submitBtn.textContent = "Create your store";
       });
   });
 
