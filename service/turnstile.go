@@ -8,22 +8,32 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"defolt-tenants-service/logger"
 )
 
 // Turnstile verifies a Cloudflare Turnstile token via the siteverify
-// endpoint. Returns nil on success. Empty secret = skipped (dev mode).
+// endpoint. Returns nil on success. Fail-closed contract: whenever a secret
+// is configured, an invalid or absent token is rejected (non-nil error).
+// Verification is skipped ONLY in the explicitly-unconfigured mode (empty
+// secret) — acceptable for local/UAT but never the production state, so
+// NewTurnstile logs a WARN to surface an accidentally-unset prod secret
+// instead of silently leaving public signup open.
 type Turnstile struct {
 	secret string
 	http   *http.Client
 }
 
 func NewTurnstile(secret string) *Turnstile {
+	if strings.TrimSpace(secret) == "" {
+		logger.LogWarn("", "turnstile", "TURNSTILE_SECRET unset: CAPTCHA verification DISABLED (public signup unprotected) - acceptable for dev/UAT only, never production")
+	}
 	return &Turnstile{secret: secret, http: &http.Client{Timeout: 6 * time.Second}}
 }
 
 func (t *Turnstile) Verify(ctx context.Context, token, remoteIP string) error {
 	if strings.TrimSpace(t.secret) == "" {
-		return nil // disabled
+		return nil // disabled: explicitly-unconfigured mode only (see NewTurnstile)
 	}
 	form := url.Values{
 		"secret":   {t.secret},
