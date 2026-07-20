@@ -233,9 +233,17 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 		return nil, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Slug)
+	// Carry the owner identity so a DRS consumer can provision the owner's
+	// user_mirror on activation and let them log in. Signup persists
+	// OwnerUserID/OwnerEmail on the tenant; without them here nothing
+	// downstream could tie the activated tenant to its Store Admin — the
+	// onboarding "sealed room" this closes.
 	s.emit("tenant.activated", map[string]any{
 		"tenant_id":       t.ID,
 		"slug":            t.Slug,
+		"name":            t.Name,
+		"owner_user_id":   t.OwnerUserID,
+		"owner_email":     t.OwnerEmail,
 		"trial_starts_at": now,
 		"trial_ends_at":   trialEnd,
 	})
