@@ -447,11 +447,37 @@ func (h *Handlers) injectPageConfig(body []byte) []byte {
 	return []byte(out)
 }
 
+// lifecyclePage writes an embedded lifecycle page as the body of a
+// non-2xx forward-auth reply. Traefik relays the status, headers and
+// body of a forward-auth response verbatim to the browser whenever the
+// auth service answers non-2xx, so the page the visitor should see has
+// to travel in that reply: there is no second hop to serve it from.
+// If the embedded read ever fails we degrade to the bare status rather
+// than turning a routing answer into a 500.
+func (h *Handlers) lifecyclePage(c *gin.Context, status int, page string) {
+	file, ok := static.Pages[page]
+	if !ok {
+		c.Status(status)
+		return
+	}
+	body, err := static.FS.ReadFile(file)
+	if err != nil {
+		c.Status(status)
+		return
+	}
+	// No caching: a host resolves differently the moment the tenant
+	// signs up or is restored, and a cached error page would outlive
+	// that change in the browser.
+	c.Header("Cache-Control", "no-store")
+	c.Data(status, "text/html; charset=utf-8", h.injectPageConfig(body))
+}
+
 // ---------- POST /internal/resolve-host (Traefik forward auth) ----------
-// Takes the Host header, extracts the leftmost label as the slug,
-// and returns 200 + X-Defolt-Tenant-* headers or a 403 / 404. Used by
-// Traefik as a forward-auth middleware; the response body is
-// discarded — headers do the work.
+// Takes the Host header, extracts the leftmost label as the slug, and
+// returns 200 + X-Defolt-Tenant-* headers, or a non-2xx carrying the
+// matching lifecycle page as its body. Used by Traefik as a
+// forward-auth middleware: on 200 the headers do the work and the body
+// is discarded, on non-2xx the body is what the visitor sees.
 func (h *Handlers) ResolveHost(c *gin.Context) {
 	host := c.GetHeader("X-Forwarded-Host")
 	if host == "" {
@@ -474,7 +500,7 @@ func (h *Handlers) ResolveHost(c *gin.Context) {
 	t, err := h.svc.ResolveBySlug(c, slug)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			c.Status(http.StatusNotFound)
+			h.lifecyclePage(c, http.StatusNotFound, "not-registered")
 			return
 		}
 		c.Status(http.StatusServiceUnavailable)
@@ -488,7 +514,7 @@ func (h *Handlers) ResolveHost(c *gin.Context) {
 		c.Header(middleware.TenantStatusHeader, string(t.Status))
 		c.Status(http.StatusOK)
 	case model.StatusSuspended, model.StatusArchived:
-		c.Status(http.StatusForbidden)
+		h.lifecyclePage(c, http.StatusForbidden, "suspended")
 	default:
 		c.Status(http.StatusAccepted) // pending_payment → landing page
 	}

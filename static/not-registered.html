@@ -36,7 +36,10 @@
 <main>
   <h1>This store isn't registered</h1>
   <p>The address you entered doesn't belong to a Defolt Retail System store. If you think this is a mistake, contact your Store Admin.</p>
-  <a class="cta" href="/public/signup.html">Create a store</a>
+  <!-- Absolute, base domain substituted at serve time (handler
+       injectPageConfig): this page now renders ON the unknown host, so
+       a relative link would loop straight back into forward auth. -->
+  <a class="cta" href="https://__TENANT_BASE_DOMAIN__/public/signup.html">Create a store</a>
 </main>
 </body>
 </html>
