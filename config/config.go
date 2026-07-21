@@ -36,16 +36,6 @@ type Config struct {
 	IdentityURL     string
 	DefaultPlatform string
 
-	// TurnstileSiteKey is the public half of the Turnstile pair. It is
-	// injected into the embedded signup page at serve time (§5.17); the
-	// default is Cloudflare's always-pass test key so the page still
-	// renders a widget on an unprovisioned environment.
-	TurnstileSiteKey string
-
-	// TenantBaseDomain builds the post-signup login address the page
-	// shows the owner: "<slug>.<TenantBaseDomain>" (plan §4.1).
-	TenantBaseDomain string
-
 	// BillingURL points at defolt-billing-service for the internal
 	// registration-checkout call (§5.11).
 	BillingURL string
@@ -90,7 +80,7 @@ func Load() (*Config, error) {
 		MaxIdleConns:    getInt("DB_MAX_IDLE_CONNS", 3),
 		ConnMaxLifetime: time.Duration(getInt("DB_CONN_MAX_LIFETIME_MIN", 15)) * time.Minute,
 
-		NatsURL:            getStr("NATS_URL", "nats://defolt-nats:4222"),
+		NatsURL: getStr("NATS_URL", "nats://defolt-nats:4222"),
 		// Falls back to the cluster-wide INTERNAL_SERVICE_KEY already in
 		// platform-env; billing and identity verify against that same value.
 		InternalServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
@@ -99,11 +89,9 @@ func Load() (*Config, error) {
 		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),
 		ReservedSlugs: reserved,
 
-		TurnstileSecret:  getStr("TURNSTILE_SECRET", ""),
-		TurnstileSiteKey: getStr("TURNSTILE_SITE_KEY", "1x00000000000000000000AA"),
-		TenantBaseDomain: getStr("TENANT_BASE_DOMAIN", "drs.defoltlabs.com"),
-		IdentityURL:      getStr("DEFOLT_IDENTITY_URL", "http://defolt-identity-service:8080"),
-		DefaultPlatform:  getStr("DEFAULT_PLATFORM", "drs"),
+		TurnstileSecret: getStr("TURNSTILE_SECRET", ""),
+		IdentityURL:     getStr("DEFOLT_IDENTITY_URL", "http://defolt-identity-service:8080"),
+		DefaultPlatform: getStr("DEFAULT_PLATFORM", "drs"),
 
 		BillingURL: getStr("DEFOLT_BILLING_URL", "http://defolt-billing-service:8080"),
 	}

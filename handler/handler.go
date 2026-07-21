@@ -12,7 +12,6 @@ import (
 	"defolt-tenants-service/repository"
 	"defolt-tenants-service/response"
 	"defolt-tenants-service/service"
-	"defolt-tenants-service/static"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -23,20 +22,14 @@ type Handlers struct {
 	ts      *service.Turnstile
 	cache   *cache.Cache
 	version string
-
-	// Values substituted into the embedded landing pages at serve time.
-	turnstileSiteKey string
-	tenantBaseDomain string
 }
 
-func New(svc *service.TenantsService, ts *service.Turnstile, c *cache.Cache, version, turnstileSiteKey, tenantBaseDomain string) *Handlers {
+func New(svc *service.TenantsService, ts *service.Turnstile, c *cache.Cache, version string) *Handlers {
 	return &Handlers{
-		svc:              svc,
-		ts:               ts,
-		cache:            c,
-		version:          version,
-		turnstileSiteKey: turnstileSiteKey,
-		tenantBaseDomain: tenantBaseDomain,
+		svc:     svc,
+		ts:      ts,
+		cache:   c,
+		version: version,
 	}
 }
 
@@ -406,78 +399,33 @@ func (h *Handlers) Activate(c *gin.Context) {
 	response.OK(c, response.OKTenantRestored.Code, response.OKTenantRestored.Meta, t)
 }
 
-// ---------- GET /public/<page>.html + /public/landing/:page (plan §5.17) ----------
-// Lifecycle landing pages Traefik points unresolved / suspended /
-// pending hosts at. Served from the embedded FS, allowlisted.
-func (h *Handlers) LandingPage(c *gin.Context) {
-	h.serveLandingPage(c, c.Param("page"))
-}
-
-// LandingPageNamed pins a handler to one specific page for the
-// explicit /public/<page>.html routes.
-func (h *Handlers) LandingPageNamed(page string) gin.HandlerFunc {
-	return func(c *gin.Context) { h.serveLandingPage(c, page) }
-}
-
-func (h *Handlers) serveLandingPage(c *gin.Context, page string) {
-	page = strings.TrimSuffix(page, ".html")
-	file, ok := static.Pages[page]
-	if !ok {
-		c.Status(http.StatusNotFound)
-		return
-	}
-	body, err := static.FS.ReadFile(file)
-	if err != nil {
-		c.Status(http.StatusNotFound)
-		return
-	}
-	body = h.injectPageConfig(body)
-	c.Header("Cache-Control", "public, max-age=300")
-	c.Data(http.StatusOK, "text/html; charset=utf-8", body)
-}
-
-// injectPageConfig substitutes the runtime config placeholders in an
-// embedded page. Pages that carry no placeholder come back unchanged,
-// and a page opened straight off disk still works because it falls
-// back to the placeholder-as-literal default in its own script.
-func (h *Handlers) injectPageConfig(body []byte) []byte {
-	out := string(body)
-	out = strings.ReplaceAll(out, "__TURNSTILE_SITE_KEY__", h.turnstileSiteKey)
-	out = strings.ReplaceAll(out, "__TENANT_BASE_DOMAIN__", h.tenantBaseDomain)
-	return []byte(out)
-}
-
-// lifecyclePage writes an embedded lifecycle page as the body of a
-// non-2xx forward-auth reply. Traefik relays the status, headers and
-// body of a forward-auth response verbatim to the browser whenever the
-// auth service answers non-2xx, so the page the visitor should see has
-// to travel in that reply: there is no second hop to serve it from.
-// If the embedded read ever fails we degrade to the bare status rather
-// than turning a routing answer into a 500.
-func (h *Handlers) lifecyclePage(c *gin.Context, status int, page string) {
-	file, ok := static.Pages[page]
-	if !ok {
-		c.Status(status)
-		return
-	}
-	body, err := static.FS.ReadFile(file)
-	if err != nil {
-		c.Status(status)
-		return
-	}
-	// No caching: a host resolves differently the moment the tenant
-	// signs up or is restored, and a cached error page would outlive
-	// that change in the browser.
-	c.Header("Cache-Control", "no-store")
-	c.Data(status, "text/html; charset=utf-8", h.injectPageConfig(body))
-}
-
 // ---------- POST /internal/resolve-host (Traefik forward auth) ----------
-// Takes the Host header, extracts the leftmost label as the slug, and
-// returns 200 + X-Defolt-Tenant-* headers, or a non-2xx carrying the
-// matching lifecycle page as its body. Used by Traefik as a
-// forward-auth middleware: on 200 the headers do the work and the body
-// is discarded, on non-2xx the body is what the visitor sees.
+// Resolves the leftmost host label to a tenant and stamps the
+// X-Defolt-Tenant-* headers Traefik forwards to the upstream.
+//
+// The edge is no longer the gate. Every state the SPA can render now
+// comes back 200 with a body-less reply, and drs-vue decides what the
+// visitor sees from X-Defolt-Tenant-Status plus its own lookup through
+// the public GET /api/v1/tenants/by-slug/:slug (whose 404 drives the
+// "unknown store" screen). Earlier revisions answered 404 and 403 here
+// with an embedded HTML page as the body, because Traefik relays the
+// status, headers and body of a non-2xx forward-auth reply verbatim to
+// the browser and there is no second hop. Those pages now live in
+// drs-vue as real views, so the reply must be 200 or the SPA never
+// loads to render them.
+//
+// This is not a security regression. Entitlement is enforced by the API
+// services themselves: drs-setup, drs-inventory and drs-sales each run
+// a RequirePaid middleware that answers 402 DL_PAYMENT_REQUIRED for a
+// lapsed tenant, keyed off SubscriptionState in defolt-billing-service.
+// Serving the SPA shell to a suspended tenant therefore grants no data
+// access; the shell only renders the screen that explains the state.
+//
+// Note the two enums stay deliberately unreconciled. TenantStatus here
+// (pending_payment|active|grace|suspended|archived) now only drives the
+// SPA gate copy, while enforcement keys off billing's SubscriptionState
+// (awaiting_registration|trial|active|grace|suspended|cancelled). They
+// can disagree, and nothing in this service should try to map them.
 func (h *Handlers) ResolveHost(c *gin.Context) {
 	host := c.GetHeader("X-Forwarded-Host")
 	if host == "" {
@@ -485,38 +433,49 @@ func (h *Handlers) ResolveHost(c *gin.Context) {
 	}
 	// Strip port + take the leftmost label as the slug.
 	slug := ""
-	if i := len(host); i > 0 {
-		if p := indexByte(host, ':'); p >= 0 {
-			host = host[:p]
-		}
+	if p := indexByte(host, ':'); p >= 0 {
+		host = host[:p]
 	}
 	if dot := indexByte(host, '.'); dot > 0 {
 		slug = host[:dot]
 	}
 	if slug == "" {
+		// No subdomain at all: this host carries no tenant and must
+		// never have reached forward auth. Refuse rather than guess.
 		c.Status(http.StatusForbidden)
 		return
 	}
 	t, err := h.svc.ResolveBySlug(c, slug)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			h.lifecyclePage(c, http.StatusNotFound, "not-registered")
+			// Unknown slug: 200 with status "unknown" and no tenant
+			// identity headers, so the SPA loads and renders its
+			// "store not found" screen. Deliberately no tenant id,
+			// slug or product header: there is no tenant to name.
+			c.Header(middleware.TenantStatusHeader, "unknown")
+			c.Status(http.StatusOK)
 			return
 		}
 		c.Status(http.StatusServiceUnavailable)
 		return
 	}
 	switch t.Status {
-	case model.StatusActive, model.StatusGrace:
+	case model.StatusArchived:
+		// Archived stays a hard 403 with an empty body. Suspended and
+		// archived used to share this branch and are now deliberately
+		// split: a suspended tenant is a customer who may pay and come
+		// back, so it gets a screen; an archived tenant is gone, with
+		// no SPA screen worth serving and no route back.
+		c.Status(http.StatusForbidden)
+	default:
+		// active, grace, suspended and pending_payment all pass with
+		// the full header set. The status header is what the SPA gate
+		// reads to pick its screen.
 		c.Header(middleware.TenantHeader, t.ID.String())
 		c.Header(middleware.TenantSlugHeader, t.Slug)
 		c.Header(middleware.TenantProductHeader, t.Product)
 		c.Header(middleware.TenantStatusHeader, string(t.Status))
 		c.Status(http.StatusOK)
-	case model.StatusSuspended, model.StatusArchived:
-		h.lifecyclePage(c, http.StatusForbidden, "suspended")
-	default:
-		c.Status(http.StatusAccepted) // pending_payment → landing page
 	}
 }
 

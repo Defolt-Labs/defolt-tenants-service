@@ -24,9 +24,6 @@ env:
   RESERVED_SLUGS: "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat"
   DEFOLT_IDENTITY_URL: http://defolt-identity-service:8080
   DEFOLT_BILLING_URL: http://defolt-billing-service:8080
-  # Login address rendered on the signup + suspended pages. Without this the
-  # code default (drs.defoltlabs.com) points UAT signups at production.
-  TENANT_BASE_DOMAIN: mt.drs.uat.defoltlabs.com
 
 envFile:
   enabled: true
@@ -42,17 +39,16 @@ pdb:
   enabled: true
   minAvailable: 2
 
-# The service serves at root (landing "/", "/public/*.html", "/api/v1/*"),
-# and the signup page posts to its own origin, so a stripped /tenants prefix
-# would break its fetches. defolt.api is a shared path-multiplexed host, so
-# publish the public surface unstripped instead of claiming "/". Notably this
-# leaves /internal/resolve-host unroutable from outside, which server.go
-# relies on: it is deliberately unauthenticated.
+# API-only now: the public pages moved into drs-vue, so the service serves
+# nothing at "/" and nothing under "/public/". Paths stay unstripped because
+# defolt.api is a shared path-multiplexed host and the SPA calls the two
+# anonymous endpoints at their full paths. Notably this leaves
+# /internal/resolve-host unroutable from outside, which server.go relies on:
+# it is deliberately unauthenticated.
 ingress:
   host: defolt.api.uat.defoltlabs.com
   stripPrefix: false
   paths:
-    - /public
     - /api/v1
 
 resources:

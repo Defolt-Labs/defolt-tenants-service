@@ -13,7 +13,6 @@ import (
 	"defolt-tenants-service/middleware"
 	"defolt-tenants-service/repository"
 	"defolt-tenants-service/service"
-	"defolt-tenants-service/static"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nats-io/nats.go"
@@ -61,7 +60,7 @@ func Initialize() (*App, error) {
 	idClient := service.NewIdentityClient(cfg.IdentityURL, cfg.InternalServiceKey, cfg.DefaultPlatform)
 	billing := service.NewBillingClient(cfg.BillingURL, cfg.InternalServiceKey)
 	svc := service.New(repo, nc, rc, idClient, billing, cfg.ReservedSlugs)
-	h := handler.New(svc, ts, rc, cfg.ServiceVersion, cfg.TurnstileSiteKey, cfg.TenantBaseDomain)
+	h := handler.New(svc, ts, rc, cfg.ServiceVersion)
 
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -81,21 +80,6 @@ func Initialize() (*App, error) {
 		pub.POST("/public/signup", h.PublicSignup)
 	}
 
-	// Lifecycle landing pages (plan §5.17): Traefik points unresolved,
-	// suspended and pending-payment hosts here.
-	for page, file := range static.Pages {
-		engine.GET("/public/"+file, h.LandingPageNamed(page))
-	}
-	engine.GET("/public/landing/:page", h.LandingPage)
-
-	// Apex front door. The bare tenant domain (drs.defoltlabs.com, no
-	// slug) carries no tenant, so it never reaches forward auth: the
-	// apex Traefik route sends it straight here. Serving the marketing
-	// landing at "/" keeps the deep links on that host (/public/*.html,
-	// /api/v1/public/signup) working unrewritten, which the signup form
-	// needs — it posts to its own origin. See handoff.md §6.
-	engine.GET("/", h.LandingPageNamed(static.Landing))
-
 	// Internal service-to-service admin routes.
 	internal := engine.Group("/api/v1", middleware.InternalServiceKey(cfg.InternalServiceKey))
 	{
@@ -112,7 +96,8 @@ func Initialize() (*App, error) {
 
 	// Traefik forward-auth entry point. Public because Traefik is the
 	// only caller and the ingress network policy prevents anyone else
-	// from reaching it. Response body is empty; headers do the work.
+	// from reaching it. Response body is always empty; headers do the
+	// work, and the SPA renders the lifecycle screens itself.
 	engine.POST("/internal/resolve-host", h.ResolveHost)
 	engine.GET("/internal/resolve-host", h.ResolveHost)
 
