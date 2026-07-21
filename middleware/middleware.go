@@ -62,11 +62,25 @@ func InternalServiceKey(sharedSecret string) gin.HandlerFunc {
 
 // CORS is a permissive dev-friendly setup; production tightens it at
 // the Traefik ingress. Kept here for symmetry with the fleet.
+//
+// Idempotency-Key is in the allow-list because the signup POST is
+// moving out of this service's own embedded page and into drs-vue,
+// which is served from a different origin (the SPA sits on the apex or
+// on a tenant subdomain, the API answers on the apex). A same-origin
+// post never triggered a preflight, so the omission was invisible; a
+// cross-origin one fails preflight and the request is never sent at
+// all. Curl will not catch this: it returns 204 regardless, because the
+// allow-list is enforced by the browser, not the server.
+//
+// Access-Control-Max-Age caches the preflight so the slug-availability
+// lookup and the signup POST do not pay for an extra round trip on
+// every keystroke-driven retry.
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Internal-Service-Key")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Internal-Service-Key, Idempotency-Key")
+		c.Header("Access-Control-Max-Age", "600")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
