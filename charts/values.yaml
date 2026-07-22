@@ -24,6 +24,9 @@ env:
   RESERVED_SLUGS: "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat"
   DEFOLT_IDENTITY_URL: http://defolt-identity-service:8080
   DEFOLT_BILLING_URL: http://defolt-billing-service:8080
+  # Base domain tenant portal hosts hang off (multi-tenant DRS): tenant slugs
+  # resolve as <slug>.mt.drs.uat.defoltlabs.com.
+  TENANT_BASE_DOMAIN: mt.drs.uat.defoltlabs.com
 
 envFile:
   enabled: true
@@ -39,17 +42,21 @@ pdb:
   enabled: true
   minAvailable: 2
 
-# API-only now: the public pages moved into drs-vue, so the service serves
-# nothing at "/" and nothing under "/public/". Paths stay unstripped because
-# defolt.api is a shared path-multiplexed host and the SPA calls the two
-# anonymous endpoints at their full paths. Notably this leaves
-# /internal/resolve-host unroutable from outside, which server.go relies on:
-# it is deliberately unauthenticated.
+# Paths stay unstripped because defolt.api is a shared path-multiplexed host
+# and callers hit the anonymous endpoints at their full paths. The verified
+# cstaging rebuild (2026-07-21) routes /public as well as /api/v1, so both
+# are published here. Notably this leaves /internal/resolve-host unroutable
+# from outside, which server.go relies on: it is deliberately unauthenticated.
 ingress:
   host: defolt.api.uat.defoltlabs.com
   stripPrefix: false
   paths:
+    - /public
     - /api/v1
+  # Chart 0.5.0: shared-host cert. Every defolt.api.uat route must reference
+  # the same TLS secret or Traefik serves the default cert on this host.
+  tls:
+    secretName: defolt-api-uat-tls
 
 resources:
   requests:
