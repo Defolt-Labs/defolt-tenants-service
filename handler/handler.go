@@ -399,6 +399,33 @@ func (h *Handlers) Activate(c *gin.Context) {
 	response.OK(c, response.OKTenantRestored.Code, response.OKTenantRestored.Meta, t)
 }
 
+// ---------- PUT /api/v1/internal/tenants/:id/subscription-state (billing→tenants) ----------
+// Called by defolt-billing when the subscription state changes.
+func (h *Handlers) SyncSubscriptionState(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "invalid id")
+		return
+	}
+	var req struct {
+		State string `json:"state" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "invalid payload")
+		return
+	}
+	t, err := h.svc.SyncSubscriptionState(c.Request.Context(), id, req.State)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
+			return
+		}
+		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
+		return
+	}
+	response.OK(c, response.OKTenantUpdated.Code, response.OKTenantUpdated.Meta, t)
+}
+
 // ---------- POST /internal/resolve-host (Traefik forward auth) ----------
 // Resolves the leftmost host label to a tenant and stamps the
 // X-Defolt-Tenant-* headers Traefik forwards to the upstream.

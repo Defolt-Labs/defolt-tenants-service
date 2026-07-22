@@ -250,6 +250,44 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	return t, nil
 }
 
+// SyncSubscriptionState is called by defolt-billing-service whenever a
+// subscription changes state. Maps billing's lifecycle enum onto the
+// tenant's SPA gate status so the edge always reflects the true billing state.
+func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID, subState string) (*model.Tenant, error) {
+	t, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var newStatus model.TenantStatus
+	switch subState {
+	case "awaiting_registration":
+		newStatus = model.StatusPendingPayment
+	case "trial", "active":
+		newStatus = model.StatusActive
+	case "grace":
+		newStatus = model.StatusGrace
+	case "suspended", "cancelled":
+		newStatus = model.StatusSuspended
+	default:
+		// Unknown states from billing should safely lock the gate
+		newStatus = model.StatusSuspended
+	}
+	if t.Status == newStatus {
+		return t, nil // no change
+	}
+	t.Status = newStatus
+	if err := s.repo.Save(ctx, t); err != nil {
+		return nil, err
+	}
+	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.emit("tenant.status_changed", map[string]any{
+		"tenant_id":        t.ID,
+		"slug":             t.Slug,
+		"status":           string(t.Status),
+		"billing_substate": subState,
+	})
+	return t, nil
+}
 // ReissueOwnerOTP generates a fresh one-time password for the tenant's
 // Store Admin and pushes it to identity's internal reset-password
 // endpoint. When owner_user_id was never stored (old rows, identity
