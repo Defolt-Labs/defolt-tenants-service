@@ -373,7 +373,12 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		"id":                res.Tenant.ID,
 		"slug":              res.Tenant.Slug,
 		"status":            res.Tenant.Status,
+		// Empty when owner_existing is true: identity kept the password
+		// the owner already has rather than taking the generated one, so
+		// there is nothing to show them.
 		"one_time_password": res.OneTimePassword,
+		"owner_existing":    res.OwnerExisting,
+		"owner_email":       res.OwnerEmail,
 		"payment_url":       res.PaymentURL,
 		"amount_tzs":        res.AmountTZS,
 	})

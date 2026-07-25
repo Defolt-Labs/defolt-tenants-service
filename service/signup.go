@@ -34,6 +34,11 @@ type SignupResult struct {
 	OneTimePassword string
 	PaymentURL      string
 	AmountTZS       float64
+	// OwnerExisting says the contact email already had a Defolt account,
+	// so no one-time password was issued and the owner signs in with the
+	// credential they already have. See the CreateUser call below.
+	OwnerExisting bool
+	OwnerEmail    string
 }
 
 // PublicSignup is the marketing form entrypoint. Verifies Turnstile,
@@ -70,9 +75,10 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// signup response — which only means anything because CreateUser
 	// inserts a real, immediately loggable-in users row.
 	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
+	out.OwnerEmail = t.OwnerEmail
 	if s.identity != nil {
 		password := generatePassword()
-		userID, regErr := s.identity.CreateUser(ctx, RegisterInput{
+		userID, existed, regErr := s.identity.CreateUser(ctx, RegisterInput{
 			Email:     in.ContactEmail,
 			FirstName: in.FirstName,
 			LastName:  in.LastName,
@@ -83,8 +89,19 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 			// Tenant record stays for support to unblock manually or the
 			// sweep ticker to reap.
 		} else {
-			out.OneTimePassword = password
 			t.OwnerUserID = userID
+			// existed means identity kept the credential this person
+			// already has and ignored the one generated above. Returning
+			// that password would be actively harmful: it looks like the
+			// way in, and it is not. Say so instead, and let the frontend
+			// tell them their existing Defolt password (or Google) opens
+			// the new store.
+			out.OwnerExisting = existed
+			if !existed {
+				out.OneTimePassword = password
+			} else {
+				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: owner already has a Defolt account, keeping their credential", t.ID))
+			}
 		}
 	}
 	if err := s.repo.Save(ctx, t); err != nil {

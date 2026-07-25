@@ -123,7 +123,19 @@ func (c *IdentityClient) do(ctx context.Context, method, path string, body any) 
 //
 // Identity is platform-oblivious: the payload carries no tenant or
 // product field. Owner linkage lives on the tenant row here.
-func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uuid.UUID, error) {
+// The second return value reports whether the address ALREADY had a
+// Defolt account, which identity signals with 200 DL_USER_EXISTS.
+//
+// That flag is load-bearing, and its absence was a real bug. Identity
+// deliberately does NOT overwrite the credential of an existing account
+// here, since letting a public signup form set the password of any
+// Defolt user is an account takeover route. It answers with the existing
+// user_id and ignores the password entirely. This function used to read
+// the id and discard the code, so signup happily returned the generated
+// one-time password anyway, and every returning Defolt customer who
+// opened a second store was handed a password that could never sign them
+// in, with no hint that their real one still worked.
+func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uuid.UUID, bool, error) {
 	raw, err := c.do(ctx, http.MethodPost, "/api/v1/internal/admin/users", map[string]any{
 		// camelCase: identity binds firstName / lastName as required, so
 		// snake_case keys bind to empty strings and fail validation.
@@ -133,19 +145,20 @@ func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uui
 		"password":  in.Password,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var env struct {
+		Code string       `json:"code"`
 		Data identityUser `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("identity create-user: bad envelope: %w", err)
+		return nil, false, fmt.Errorf("identity create-user: bad envelope: %w", err)
 	}
 	id := env.Data.userID()
 	if id == nil {
-		return nil, fmt.Errorf("identity create-user: envelope missing user_id")
+		return nil, false, fmt.Errorf("identity create-user: envelope missing user_id")
 	}
-	return id, nil
+	return id, env.Code == "DL_USER_EXISTS", nil
 }
 
 // FindUserIDByEmail resolves a user id via the internal admin lookup.
