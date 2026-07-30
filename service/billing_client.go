@@ -45,11 +45,11 @@ type CheckoutResult struct {
 // tenant's registration invoice. Callers treat failure as non-fatal:
 // the tenant stays `pending_payment` and the link can be re-issued
 // via resend-payment-link.
-func (c *BillingClient) CreateCheckout(ctx context.Context, tenantID uuid.UUID, ownerEmail string) (*CheckoutResult, error) {
+func (c *BillingClient) CreateCheckout(ctx context.Context, tenantID uuid.UUID, ownerEmail string, redirectURL string) (*CheckoutResult, error) {
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("billing-client: baseURL not configured")
 	}
-	body, _ := json.Marshal(map[string]any{"owner_email": ownerEmail})
+	body, _ := json.Marshal(map[string]any{"owner_email": ownerEmail, "redirect_url": redirectURL})
 	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/checkout", c.baseURL, tenantID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

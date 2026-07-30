@@ -23,6 +23,7 @@ type SignupInput struct {
 	LastName     string
 	CountryCode  string
 	TurnstileTok string
+	RedirectURL  string
 	ClientIP     string
 }
 
@@ -111,7 +112,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// Registration checkout. Non-fatal: an empty payment_url tells the
 	// frontend to surface the resend-payment-link path.
 	if s.billing != nil {
-		checkout, billErr := s.billing.CreateCheckout(ctx, t.ID, t.OwnerEmail)
+		checkout, billErr := s.billing.CreateCheckout(ctx, t.ID, t.OwnerEmail, in.RedirectURL)
 		if billErr != nil {
 			logger.LogWarn("", "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
 		} else {

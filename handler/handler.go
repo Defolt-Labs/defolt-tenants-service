@@ -333,6 +333,7 @@ type signupBody struct {
 	LastName     string `json:"last_name" binding:"required"`
 	CountryCode  string `json:"country_code"`
 	TurnstileTok string `json:"turnstile_token"`
+	RedirectURL  string `json:"redirect_url"`
 }
 
 func (h *Handlers) PublicSignup(c *gin.Context) {
@@ -352,6 +353,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		LastName:     body.LastName,
 		CountryCode:  body.CountryCode,
 		TurnstileTok: body.TurnstileTok,
+		RedirectURL:  body.RedirectURL,
 		ClientIP:     c.ClientIP(),
 	}, h.ts)
 	if err != nil {

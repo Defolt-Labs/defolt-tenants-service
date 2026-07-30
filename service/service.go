@@ -336,7 +336,7 @@ func (s *TenantsService) ResendPaymentLink(ctx context.Context, id uuid.UUID) (*
 	if email == "" {
 		email = t.ContactEmail
 	}
-	res, err := s.billing.CreateCheckout(ctx, t.ID, email)
+	res, err := s.billing.CreateCheckout(ctx, t.ID, email, "")
 	if err != nil {
 		logger.LogWarn("", "resend-payment-link", fmt.Sprintf("tenant=%s: %v", t.ID, err))
 		return nil, ErrBillingDown
