@@ -272,7 +272,8 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 		// Unknown states from billing should safely lock the gate
 		newStatus = model.StatusSuspended
 	}
-	if t.Status == newStatus {
+	oldStatus := t.Status
+	if oldStatus == newStatus {
 		return t, nil // no change
 	}
 	t.Status = newStatus
@@ -286,6 +287,17 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 		"status":           string(t.Status),
 		"billing_substate": subState,
 	})
+
+	if oldStatus == model.StatusPendingPayment && newStatus == model.StatusActive {
+		s.emit("tenant.activated", map[string]any{
+			"tenant_id":     t.ID,
+			"slug":          t.Slug,
+			"name":          t.Name,
+			"owner_user_id": t.OwnerUserID,
+			"owner_email":   t.OwnerEmail,
+		})
+	}
+
 	return t, nil
 }
 // ReissueOwnerOTP generates a fresh one-time password for the tenant's
