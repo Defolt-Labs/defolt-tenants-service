@@ -384,7 +384,26 @@ func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 		// whole tenant for the next tick to retry; the delete is
 		// idempotent, so retrying is free.
 		if t.OwnerUserID != nil && s.identity != nil {
-			if err := s.identity.DeleteUser(ctx, *t.OwnerUserID); err != nil {
+			// One person can hold several tenants: a first store plus a
+			// second signup, or two attempts at the same one. The owner
+			// belongs to the PERSON, not to this row, so an abandoned
+			// signup is not evidence that the account is unwanted. Deleting
+			// it anyway destroys the login for every other tenant they own,
+			// silently — the stores keep serving, the person simply can
+			// never sign in again, and identity scrubs the password hash on
+			// the way out so there is nothing left to restore them with.
+			// That is not hypothetical: it happened on UAT on 2026-08-01.
+			others, err := s.repo.CountOtherTenantsOwnedBy(ctx, *t.OwnerUserID, t.ID)
+			if err != nil {
+				logger.LogWarn("", "sweep-abandoned", fmt.Sprintf("tenant=%s owner check failed, retrying next tick: %v", t.ID, err))
+				continue
+			}
+			if others > 0 {
+				// Drop the abandoned tenant, keep the person. Any sibling
+				// that is itself abandoned is swept on a later tick, by
+				// which point this row no longer counts against it.
+				logger.LogInfo("sweep-abandoned", fmt.Sprintf("tenant=%s owner=%s owns %d other tenant(s), keeping the identity account", t.ID, *t.OwnerUserID, others))
+			} else if err := s.identity.DeleteUser(ctx, *t.OwnerUserID); err != nil {
 				logger.LogWarn("", "sweep-abandoned", fmt.Sprintf("tenant=%s identity delete failed, retrying next tick: %v", t.ID, err))
 				continue
 			}

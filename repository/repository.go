@@ -120,6 +120,26 @@ func (r *Repo) ListPendingCleanup(ctx context.Context, olderThanHours int) ([]mo
 	return out, err
 }
 
+// CountOtherTenantsOwnedBy reports how many OTHER tenants the given identity
+// user owns, excluding the one being swept. The sweeper uses this to decide
+// whether deleting that identity account is safe.
+//
+// Deliberately counts every status, not just the live ones. A person part way
+// through a second signup owns a `pending_payment` tenant that is not yet old
+// enough to sweep, and deleting their account would strand it exactly as it
+// stranded the active ones. Any sibling that IS abandoned gets swept on a
+// later tick, and once this row is gone it no longer counts as a sibling, so
+// the last abandoned tenant for that owner finds a clean slate and the
+// identity delete finally fires. The cleanup is deferred, never skipped.
+func (r *Repo) CountOtherTenantsOwnedBy(ctx context.Context, ownerUserID uuid.UUID, excludeTenantID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).
+		Model(&model.Tenant{}).
+		Where("owner_user_id = ? AND id <> ?", ownerUserID, excludeTenantID).
+		Count(&n).Error
+	return n, err
+}
+
 // HardDelete removes the row plus any downstream cascades handled
 // via NATS `tenant.deleted`. Only used by the abandonment sweeper.
 func (r *Repo) HardDelete(ctx context.Context, id uuid.UUID) error {
