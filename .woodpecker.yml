@@ -79,15 +79,15 @@ steps:
       script:
         - |
           export KUBECONFIG=/home/devops/.kube/config
-          DOCKERCFG=$(kubectl get secret registry-uat -n defolt-platform -o json | jq -r '.data[".dockerconfigjson"]' | base64 -d)
-          REGISTRY_USERNAME=$(echo "$DOCKERCFG" | jq -r '.auths["registry.uat.defoltlabs.com"].username')
-          REGISTRY_PASSWORD=$(echo "$DOCKERCFG" | jq -r '.auths["registry.uat.defoltlabs.com"].password')
-          if [ -z "${REGISTRY_USERNAME:-}" ] || [ "$REGISTRY_USERNAME" = "null" ] || [ -z "${REGISTRY_PASSWORD:-}" ] || [ "$REGISTRY_PASSWORD" = "null" ]; then
-            echo "ERROR - could not read registry credentials from secret/registry-uat"; exit 1
+          ENV_VARS=$(kubectl get secret platform-env -n defolt-platform -o jsonpath='{.data.\.env}' | base64 -d)
+          REGISTRY_USERNAME=$(echo "$ENV_VARS" | grep '^REGISTRY_USERNAME=' | cut -d= -f2-)
+          REGISTRY_PASSWORD=$(echo "$ENV_VARS" | grep '^REGISTRY_PASSWORD=' | cut -d= -f2-)
+          REGISTRY_URL=$(echo "$ENV_VARS" | grep '^REGISTRY_URL=' | cut -d= -f2-)
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_PASSWORD:-}" ]; then
+            echo "ERROR - could not read registry credentials from Infisical platform-env secret"; exit 1
           fi
+          REG=${REGISTRY_URL:-registry.uat.defoltlabs.com}
 
-
-          REG=registry.uat.defoltlabs.com
           TAG=$(curl -fsSL -u "${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}" "https://$REG/v2/${CI_REPO_NAME}/tags/list?n=10000" | grep -oE '"[0-9]+"' | tr -d '"' | sort -n | tail -1)
           if [ -z "$TAG" ]; then echo "ERROR: no numbered image found in registry for ${CI_REPO_NAME}"; exit 1; fi
           echo "Promoting ${CI_REPO_NAME}:$TAG to prod"
