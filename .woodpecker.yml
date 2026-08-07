@@ -79,7 +79,7 @@ steps:
       script:
         - |
           export KUBECONFIG=/home/devops/.kube/config
-          ENV_VARS=$(kubectl get secret platform-env -n defolt-platform -o jsonpath='{.data.\.env}' | base64 -d)
+          ENV_VARS=$(kubectl get secret platform-env -n defolt-platform -o json | jq -r '.data[".env"]' | base64 -d)
           REGISTRY_USERNAME=$(echo "$ENV_VARS" | grep '^REGISTRY_USERNAME=' | cut -d= -f2-)
           REGISTRY_PASSWORD=$(echo "$ENV_VARS" | grep '^REGISTRY_PASSWORD=' | cut -d= -f2-)
           REGISTRY_URL=$(echo "$ENV_VARS" | grep '^REGISTRY_URL=' | cut -d= -f2-)
@@ -87,6 +87,7 @@ steps:
             echo "ERROR - could not read registry credentials from Infisical platform-env secret"; exit 1
           fi
           REG=${REGISTRY_URL:-registry.uat.defoltlabs.com}
+
 
           TAG=$(curl -fsSL -u "${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}" "https://$REG/v2/${CI_REPO_NAME}/tags/list?n=10000" | grep -oE '"[0-9]+"' | tr -d '"' | sort -n | tail -1)
           if [ -z "$TAG" ]; then echo "ERROR: no numbered image found in registry for ${CI_REPO_NAME}"; exit 1; fi
