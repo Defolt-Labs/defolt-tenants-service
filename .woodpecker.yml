@@ -51,11 +51,23 @@ steps:
             --wait --timeout 3m
         - rm -rf /tmp/${CI_REPO_NAME}-${CI_PIPELINE_NUMBER}
 
-  # === PRODUCTION: promote the latest UAT-validated image, deploy on tag ===
-  # First-ever prod deploy — defolt-tenants-service has never been released
-  # to defolt-platform on cprod. DRS's tenant-resolution forwardAuth and
-  # signup/by-slug IngressRoutes depend on this being live before the DRS
-  # apex/wildcard routing (Phase 2 of the DRS prod bring-up) can work.
+  - name: build-image-prod
+    when:
+      event: tag
+    image: gcr.io/kaniko-project/executor:debug
+    environment:
+      REGISTRY_USER:
+        from_secret: registry_username
+      REGISTRY_PASS:
+        from_secret: registry_password
+    commands:
+      - mkdir -p /kaniko/.docker
+      - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
+      - printf '{"auths":{"registry.uat.defoltlabs.com":{"auth":"%s"}}}' "$AUTH" > /kaniko/.docker/config.json
+      - >-
+        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_COMMIT_TAG} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:prod --digest-file=/kaniko/digest-file
+
+  # === PRODUCTION: promote image, deploy on tag ===
   - name: upload-prod-values
     image: appleboy/drone-scp
     when:
@@ -73,31 +85,19 @@ steps:
     when:
       event: tag
     settings:
+      script_stop: true
       host: { from_secret: prod_server_host }
       username: devops
       key: { from_secret: prod_ssh_key }
       script:
-        - |
-          export KUBECONFIG=/home/devops/.kube/config
-          ENV_VARS=$(kubectl get secret platform-env -n defolt-platform -o json | jq -r '.data[".env"]' | base64 -d)
-          REGISTRY_USERNAME=$(echo "$ENV_VARS" | grep '^REGISTRY_USERNAME=' | cut -d= -f2-)
-          REGISTRY_PASSWORD=$(echo "$ENV_VARS" | grep '^REGISTRY_PASSWORD=' | cut -d= -f2-)
-          REGISTRY_URL=$(echo "$ENV_VARS" | grep '^REGISTRY_URL=' | cut -d= -f2-)
-          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_PASSWORD:-}" ]; then
-            echo "ERROR - could not read registry credentials from Infisical platform-env secret"; exit 1
-          fi
-          REG=${REGISTRY_URL:-registry.uat.defoltlabs.com}
-
-
-          TAG=$(curl -fsSL -u "${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}" "https://$REG/v2/${CI_REPO_NAME}/tags/list?n=10000" | grep -oE '"[0-9]+"' | tr -d '"' | sort -n | tail -1)
-          if [ -z "$TAG" ]; then echo "ERROR: no numbered image found in registry for ${CI_REPO_NAME}"; exit 1; fi
-          echo "Promoting ${CI_REPO_NAME}:$TAG to prod"
-          export KUBECONFIG=/home/devops/.kube/config
-          helm upgrade --install ${CI_REPO_NAME} /opt/defolt/charts/defolt-service \
-            --namespace defolt-platform \
-            --values /tmp/${CI_REPO_NAME}-${CI_COMMIT_TAG}/charts/values.yaml \
-            --set image.tag=$TAG \
-            --set ingress.host=defolt.api.defoltlabs.com \
-            --set ingress.tls.secretName=defolt-api-tls \
+        - export KUBECONFIG=/home/devops/.kube/config
+        - helm upgrade --install ${CI_REPO_NAME} /opt/defolt/charts/defolt-service
+            --namespace defolt-platform
+            --create-namespace
+            --values /tmp/${CI_REPO_NAME}-${CI_COMMIT_TAG}/charts/values.yaml
+            --set image.tag=${CI_COMMIT_TAG}
+            --set ingress.host=defolt.api.defoltlabs.com
+            --set ingress.tls.secretName=defolt-api-tls
             --wait --timeout 3m
-          rm -rf /tmp/${CI_REPO_NAME}-${CI_COMMIT_TAG}
+        - rm -rf /tmp/${CI_REPO_NAME}-${CI_COMMIT_TAG}
+
