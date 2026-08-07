@@ -78,11 +78,16 @@ steps:
       key: { from_secret: prod_ssh_key }
       script:
         - |
-          set -e
-          set -a; . /etc/defolt/registry.env 2>/dev/null || true; set +a
+          export KUBECONFIG=/home/devops/.kube/config
+          DOCKERCFG=$(kubectl get secret registry-uat -n defolt-platform -o go-template='{{index .data ".dockerconfigjson"}}' | base64 -d)
+          AUTH_B64=$(echo "$DOCKERCFG" | grep -oE '"auth":"[^"]*"' | head -n1 | cut -d '"' -f 4)
+          DECODED=$(echo "$AUTH_B64" | base64 -d)
+          REGISTRY_USERNAME=${DECODED%%:*}
+          REGISTRY_PASSWORD=${DECODED#*:}
           if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_PASSWORD:-}" ]; then
-            echo "ERROR: REGISTRY_USERNAME/PASSWORD not set; expected /etc/defolt/registry.env on prod host"; exit 1
+            echo "ERROR - could not read registry credentials from secret/registry-uat"; exit 1
           fi
+
           REG=registry.uat.defoltlabs.com
           TAG=$(curl -fsSL -u "${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}" "https://$REG/v2/${CI_REPO_NAME}/tags/list?n=10000" | grep -oE '"[0-9]+"' | tr -d '"' | sort -n | tail -1)
           if [ -z "$TAG" ]; then echo "ERROR: no numbered image found in registry for ${CI_REPO_NAME}"; exit 1; fi
