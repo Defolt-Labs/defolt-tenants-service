@@ -18,7 +18,7 @@ steps:
       - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
       - printf '{"auths":{"registry.uat.defoltlabs.com":{"auth":"%s"}}}' "$AUTH" > /kaniko/.docker/config.json
       - >-
-        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_PIPELINE_NUMBER} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:latest --digest-file=/kaniko/digest-file
+        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_PIPELINE_NUMBER} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:latest --cache=true --cache-repo=registry.uat.defoltlabs.com/cache/${CI_REPO_NAME} --cache-ttl=336h --digest-file=/kaniko/digest-file
 
   - name: upload-values
     when:
@@ -65,7 +65,7 @@ steps:
       - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
       - printf '{"auths":{"registry.uat.defoltlabs.com":{"auth":"%s"}}}' "$AUTH" > /kaniko/.docker/config.json
       - >-
-        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_COMMIT_TAG} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:prod --digest-file=/kaniko/digest-file
+        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_COMMIT_TAG} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:prod --cache=true --cache-repo=registry.uat.defoltlabs.com/cache/${CI_REPO_NAME} --cache-ttl=336h --digest-file=/kaniko/digest-file
 
   # === PRODUCTION: promote image, deploy on tag ===
   - name: upload-prod-values
