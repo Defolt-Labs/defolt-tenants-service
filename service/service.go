@@ -356,6 +356,25 @@ func (s *TenantsService) ResendPaymentLink(ctx context.Context, id uuid.UUID) (*
 	return res, nil
 }
 
+// PendingCheckoutByEmail resumes payment for the pending_payment tenant
+// this email owns, if any. Backs drs-setup-service's sign-in path: a
+// returning owner who hasn't paid yet has no UserMirror row (only
+// tenant.activated creates one) and would otherwise always hit the
+// generic "no store account" message. This lets sign-in hand back a
+// fresh payment link directly instead of sending them through the
+// signup form again.
+func (s *TenantsService) PendingCheckoutByEmail(ctx context.Context, email string) (*model.Tenant, *CheckoutResult, error) {
+	t, err := s.repo.FindPendingByContactEmail(ctx, email)
+	if err != nil {
+		return nil, nil, err
+	}
+	checkout, err := s.ResendPaymentLink(ctx, t.ID)
+	if err != nil {
+		return t, nil, err
+	}
+	return t, checkout, nil
+}
+
 // SweepAbandoned runs on the 15-minute ticker and hard-deletes tenants
 // stuck in `pending_payment` past the 24-hour threshold. Publishes
 // `tenant.abandoned` per §5.11 so downstream cleanups fire, and

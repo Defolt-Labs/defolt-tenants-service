@@ -78,6 +78,24 @@ func (r *Repo) FindBySlug(ctx context.Context, slug string) (*model.Tenant, erro
 	return &t, err
 }
 
+// FindPendingByContactEmail returns the tenant this email is waiting to
+// pay for, if any. Scoped to pending_payment only and ordered newest
+// first: this backs the sign-in "you already started this, pay now"
+// path (drs-setup-service), which must never be usable to discover
+// whether an email owns an ACTIVE store — only whether there's an
+// unpaid registration to resume.
+func (r *Repo) FindPendingByContactEmail(ctx context.Context, email string) (*model.Tenant, error) {
+	var t model.Tenant
+	err := r.db.WithContext(ctx).
+		Where("LOWER(contact_email) = LOWER(?) AND status = ?", strings.TrimSpace(email), model.StatusPendingPayment).
+		Order("created_at DESC").
+		First(&t).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	return &t, err
+}
+
 // Save persists mutations. Callers should read-then-modify to keep
 // the semantics predictable.
 func (r *Repo) Save(ctx context.Context, t *model.Tenant) error {

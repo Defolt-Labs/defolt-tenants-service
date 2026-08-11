@@ -297,6 +297,39 @@ func (h *Handlers) ResendPaymentLink(c *gin.Context) {
 	})
 }
 
+// ---------- GET /internal/tenants/pending-checkout?email= ----------
+// Backs drs-setup-service's sign-in path. Deliberately scoped to
+// pending_payment only (see FindPendingByContactEmail) — this must
+// never be usable to discover whether an email owns an ACTIVE store,
+// only whether there is an unpaid registration to resume.
+func (h *Handlers) PendingCheckoutByEmail(c *gin.Context) {
+	email := c.Query("email")
+	if email == "" {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "email is required")
+		return
+	}
+	t, checkout, err := h.svc.PendingCheckoutByEmail(c.Request.Context(), email)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
+		case errors.Is(err, service.ErrBillingDown):
+			c.JSON(http.StatusServiceUnavailable, response.Envelope{
+				Code: response.ErrBillingUnavailable.Code,
+				Meta: response.ErrBillingUnavailable.Meta,
+			})
+		default:
+			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
+		}
+		return
+	}
+	response.OK(c, response.OKTenantPaymentLink.Code, response.OKTenantPaymentLink.Meta, gin.H{
+		"slug":        t.Slug,
+		"payment_url": checkout.PaymentURL,
+		"amount_tzs":  checkout.AmountTZS,
+	})
+}
+
 // ---------- GET /api/v1/tenants/:id/health ----------
 // Rollup of "is this tenant still live and paid". Consumers include
 // the SPA topbar's tenant status pill.

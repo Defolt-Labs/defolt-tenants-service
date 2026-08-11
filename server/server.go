@@ -90,6 +90,7 @@ func Initialize() (*App, error) {
 		internal.POST("/tenants/:id/restore", h.Restore)
 		internal.POST("/tenants/:id/reissue-owner-otp", h.ReissueOwnerOTP)
 		internal.POST("/tenants/:id/resend-payment-link", h.ResendPaymentLink)
+		internal.GET("/tenants/pending-checkout", h.PendingCheckoutByEmail)
 		internal.GET("/tenants/:id/health", h.TenantHealth)
 		internal.POST("/internal/tenants/:id/activate", h.Activate)
 		internal.PUT("/internal/tenants/:id/subscription-state", h.SyncSubscriptionState)
