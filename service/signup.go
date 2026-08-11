@@ -66,7 +66,26 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		Plan:         "standard",
 	})
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrSlugTaken) {
+			// The same person, cancelling out of payment and immediately
+			// retrying with the same slug, hit a hard uniqueness conflict
+			// here otherwise: this row's own pending_payment tenant blocked
+			// its own owner from ever finishing signup, for up to 24h until
+			// SweepAbandoned reaped it. Resume instead of rejecting when the
+			// existing row is unmistakably the same abandoned attempt (same
+			// slug, same email, still pending_payment) — everything below
+			// this point (identity CreateUser, billing CreateCheckout) is
+			// already idempotent for an existing tenant, so falling through
+			// into the normal flow with the resumed row is enough; no
+			// separate code path needed.
+			if resumed, rerr := s.resumeStalledSignup(ctx, in); rerr == nil {
+				t = resumed
+			} else {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 
 	out := &SignupResult{Tenant: t}
@@ -121,6 +140,28 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		}
 	}
 	return out, nil
+}
+
+// resumeStalledSignup finds the tenant already squatting on this slug
+// and returns it only when the retry is unmistakably the same abandoned
+// attempt: still pending_payment, and the same contact email as the new
+// submission. Anything else (a different email, or a slug that belongs
+// to an active/suspended/archived tenant) stays a genuine conflict —
+// this must never let a stranger hijack someone else's registration by
+// guessing their slug.
+func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput) (*model.Tenant, error) {
+	slug := strings.ToLower(strings.TrimSpace(in.Slug))
+	existing, err := s.repo.FindBySlug(ctx, slug)
+	if err != nil {
+		return nil, ErrSlugTaken
+	}
+	if existing.Status != model.StatusPendingPayment {
+		return nil, ErrSlugTaken
+	}
+	if !strings.EqualFold(strings.TrimSpace(existing.ContactEmail), strings.TrimSpace(in.ContactEmail)) {
+		return nil, ErrSlugTaken
+	}
+	return existing, nil
 }
 
 // generatePassword makes a one-time password: "Defolt-" prefix plus
