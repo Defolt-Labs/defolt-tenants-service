@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"defolt-tenants-service/logger"
 	"defolt-tenants-service/model"
+
+	"github.com/google/uuid"
 )
 
 var ErrTurnstile = errors.New("turnstile verification failed")
@@ -89,36 +92,70 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	}
 
 	out := &SignupResult{Tenant: t}
+	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
+	out.OwnerEmail = t.OwnerEmail
+
+	// Store Admin provisioning (defolt-identity) and registration
+	// checkout (defolt-billing, which itself reaches defolt-payment and
+	// from there Selcom's real gateway) don't depend on each other's
+	// result — billing only needs t.ID/t.OwnerEmail/in.RedirectURL,
+	// all already set above, not anything CreateUser returns. Run them
+	// concurrently rather than back to back: this was the single
+	// biggest chunk of the signup form's end-to-end wait, all of it
+	// spent blocked on one external call while a completely unrelated
+	// one sat idle. Each goroutine writes only its own local result;
+	// out/t are touched solely after both complete via wg.Wait(), so
+	// there is nothing to guard with a mutex.
+	var wg sync.WaitGroup
+	var identityUserID *uuid.UUID
+	var identityExisted bool
+	var identityPassword string
+	var identityErr error
+	var checkout *CheckoutResult
+	var billErr error
+
+	if s.identity != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			identityPassword = generatePassword()
+			identityUserID, identityExisted, identityErr = s.identity.CreateUser(ctx, RegisterInput{
+				Email:     in.ContactEmail,
+				FirstName: in.FirstName,
+				LastName:  in.LastName,
+				Password:  identityPassword,
+			})
+		}()
+	}
+	if s.billing != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			checkout, billErr = s.billing.CreateCheckout(ctx, t.ID, t.OwnerEmail, in.RedirectURL)
+		}()
+	}
+	wg.Wait()
 
 	// Store Admin provisioning. The generated temp password IS the
 	// one-time password the owner logs in with, so it goes back in the
 	// signup response — which only means anything because CreateUser
 	// inserts a real, immediately loggable-in users row.
-	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
-	out.OwnerEmail = t.OwnerEmail
 	if s.identity != nil {
-		password := generatePassword()
-		userID, existed, regErr := s.identity.CreateUser(ctx, RegisterInput{
-			Email:     in.ContactEmail,
-			FirstName: in.FirstName,
-			LastName:  in.LastName,
-			Password:  password,
-		})
-		if regErr != nil {
-			logger.LogWarn("", "signup-identity", fmt.Sprintf("tenant=%s email=%s: %v", t.ID, in.ContactEmail, regErr))
+		if identityErr != nil {
+			logger.LogWarn("", "signup-identity", fmt.Sprintf("tenant=%s email=%s: %v", t.ID, in.ContactEmail, identityErr))
 			// Tenant record stays for support to unblock manually or the
 			// sweep ticker to reap.
 		} else {
-			t.OwnerUserID = userID
+			t.OwnerUserID = identityUserID
 			// existed means identity kept the credential this person
 			// already has and ignored the one generated above. Returning
 			// that password would be actively harmful: it looks like the
 			// way in, and it is not. Say so instead, and let the frontend
 			// tell them their existing Defolt password (or Google) opens
 			// the new store.
-			out.OwnerExisting = existed
-			if !existed {
-				out.OneTimePassword = password
+			out.OwnerExisting = identityExisted
+			if !identityExisted {
+				out.OneTimePassword = identityPassword
 			} else {
 				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: owner already has a Defolt account, keeping their credential", t.ID))
 			}
@@ -131,7 +168,6 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// Registration checkout. Non-fatal: an empty payment_url tells the
 	// frontend to surface the resend-payment-link path.
 	if s.billing != nil {
-		checkout, billErr := s.billing.CreateCheckout(ctx, t.ID, t.OwnerEmail, in.RedirectURL)
 		if billErr != nil {
 			logger.LogWarn("", "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
 		} else {
