@@ -21,7 +21,23 @@ env:
   AUTO_MIGRATE: "true"
   # Comma-separated list of slugs the registry refuses to allocate.
   # Reserved to avoid collisions with fleet-internal subdomains.
-  RESERVED_SLUGS: "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat"
+  #
+  # Grown 2026-08-15 for §5.10, and the ordering there is deliberate: the
+  # list must be wide BEFORE the `*.shop.defoltlabs.com` wildcard route
+  # goes live. Until then a slug is only ever a path segment; afterwards
+  # it is a real hostname, so `api` or `www` would let a tenant claim a
+  # name adjacent to real infrastructure.
+  #
+  # Added: app, shop, staging, secrets, s3, registry, vps -- every other
+  # label that already resolves under defoltlabs.com, checked against the
+  # live certificate list on both clusters rather than recalled.
+  #
+  # Existing tenants were audited against the additions first (§5.10
+  # step 3 says a tenant already holding a now-reserved slug must be
+  # migrated, not broken): 13 on UAT, 1 on prod, none holding any of
+  # them, so nothing had to move. `defolt` is deliberately NOT reserved
+  # -- a live UAT tenant holds it.
+  RESERVED_SLUGS: "www,api,app,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat,shop,staging,secrets,s3,registry,vps"
   DEFOLT_IDENTITY_URL: http://defolt-identity-service:8080
   DEFOLT_BILLING_URL: http://defolt-billing-service:8080
   # Base domain tenant portal hosts hang off (multi-tenant DRS): tenant slugs

@@ -58,7 +58,7 @@ func Load() (*Config, error) {
 		}
 	}
 
-	reserved := strings.Split(getStr("RESERVED_SLUGS", "www,api,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,drs,mt,uat"), ",")
+	reserved := strings.Split(getStr("RESERVED_SLUGS", "www,api,app,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat,shop,staging,secrets,s3,registry,vps"), ",")
 	for i, r := range reserved {
 		reserved[i] = strings.TrimSpace(r)
 	}
