@@ -55,11 +55,18 @@ type CreateInput struct {
 	Slug         string
 	Name         string
 	ContactEmail string
-	// Phone is optional at this layer even though the signup form makes
-	// it required. Deliberate: the internal POST /api/v1/tenants is used
-	// by callers that predate the column, and refusing them would turn a
-	// missing field into a failed tenant creation. The form is where the
-	// requirement belongs; here it is normalised if present.
+	// Phone is REQUIRED, and that is the point of the whole row.
+	//
+	// §10.9 originally kept DEFOLT_CLIENT_PHONE as a permanent fallback
+	// for tenants without one. The owner amended that on 2026-08-15: a
+	// global constant standing in for a per-merchant field is exactly
+	// what put "UAT Demo Client" on real merchants' Selcom records. The
+	// globals are deleted, so a new tenant that lacks a phone would have
+	// nothing behind it — which means the only safe place to insist is
+	// here, at the point of creation.
+	//
+	// Refused input is a 400 with a readable reason (see RequirePhone),
+	// never a silently empty column.
 	Phone        string
 	Currency     string
 	Timezone     string
@@ -79,11 +86,15 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.ContactEmail) == "" {
 		return nil, ErrValidation
 	}
+	phone, err := RequirePhone(in.Phone)
+	if err != nil {
+		return nil, err
+	}
 	t := &model.Tenant{
 		Slug:         slug,
 		Name:         strings.TrimSpace(in.Name),
 		ContactEmail: strings.TrimSpace(in.ContactEmail),
-		Phone:        NormalizePhone(in.Phone),
+		Phone:        phone,
 		Currency:     defaultStr(in.Currency, "TZS"),
 		Timezone:     defaultStr(in.Timezone, "Africa/Dar_es_Salaam"),
 		CountryCode:  defaultStr(in.CountryCode, "TZ"),
@@ -160,9 +171,21 @@ func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInpu
 		t.ContactEmail = strings.TrimSpace(*in.ContactEmail)
 		changed = true
 	}
-	if in.Phone != nil && strings.TrimSpace(*in.Phone) != "" {
-		t.Phone = NormalizePhone(*in.Phone)
-		changed = true
+	// A PATCH that omits phone leaves it alone; a PATCH that sends one
+	// must send a usable one. Deliberately not RequirePhone: clearing a
+	// phone by sending "" is refused here rather than accepted, because
+	// an existing tenant silently losing its number would put the
+	// checkout back where §10.9 started — but a caller who simply is not
+	// editing the phone sends nil and is unaffected.
+	if in.Phone != nil {
+		p, err := RequirePhone(*in.Phone)
+		if err != nil {
+			return nil, err
+		}
+		if p != t.Phone {
+			t.Phone = p
+			changed = true
+		}
 	}
 	if in.Plan != nil && strings.TrimSpace(*in.Plan) != "" {
 		t.Plan = strings.TrimSpace(*in.Plan)

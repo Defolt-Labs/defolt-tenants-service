@@ -85,7 +85,12 @@ type createBody struct {
 	Slug         string `json:"slug" binding:"required"`
 	Name         string `json:"name" binding:"required"`
 	ContactEmail string `json:"contact_email" binding:"required,email"`
-	Phone        string `json:"phone"`
+	// Required: §10.9 as amended 2026-08-15 deletes the DEFOLT_CLIENT_*
+	// globals, so a tenant created without a phone has nothing behind it
+	// on the Selcom checkout. service.RequirePhone does the real
+	// validation and produces the message the caller is shown; this tag
+	// only catches the field being absent entirely.
+	Phone        string `json:"phone" binding:"required"`
 	Currency     string `json:"currency"`
 	Timezone     string `json:"timezone"`
 	CountryCode  string `json:"country_code"`
@@ -197,6 +202,14 @@ func (h *Handlers) Patch(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
+			return
+		}
+		// A refused phone is the caller's fault, not ours. Without this
+		// arm it fell into the 500 below, and drs-setup's store-profile
+		// mirror would have reported "something went wrong" for a number
+		// the merchant could have fixed by retyping it.
+		if errors.Is(err, service.ErrValidation) {
+			response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
 			return
 		}
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
@@ -366,12 +379,19 @@ type signupBody struct {
 	Slug         string `json:"slug" binding:"required"`
 	Name         string `json:"name" binding:"required"`
 	ContactEmail string `json:"contact_email" binding:"required,email"`
-	// Not `binding:"required"` even though the form requires it. A hard
-	// server-side requirement would break every signup in the window
-	// between deploying this service and deploying the drs-vue form that
-	// sends the field — a self-inflicted signup outage, to gain nothing
-	// billing's fallback does not already cover (§10.9 item 5).
-	Phone        string `json:"phone"`
+	// REQUIRED — reversing the earlier decision on this line.
+	//
+	// It was left optional so that deploying this service and deploying
+	// the drs-vue form need not be simultaneous, on the grounds that
+	// billing's DEFOLT_CLIENT_PHONE fallback covered the gap. The owner
+	// deleted that fallback on 2026-08-15 (§10.9 as amended), so there
+	// is nothing behind an absent phone any more.
+	//
+	// The deploy-window hazard is real and is handled by ORDERING, not
+	// by weakening the contract: drs-vue ships the field to an
+	// environment BEFORE this service starts insisting on it. See the
+	// §12.2 entry for row 13.7.
+	Phone        string `json:"phone" binding:"required"`
 	FirstName    string `json:"first_name" binding:"required"`
 	LastName     string `json:"last_name" binding:"required"`
 	CountryCode  string `json:"country_code"`

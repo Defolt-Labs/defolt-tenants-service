@@ -42,17 +42,24 @@ type Tenant struct {
 	Slug         string    `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
 	Name         string    `gorm:"size:120;not null" json:"name"`
 	ContactEmail string    `gorm:"size:180;not null" json:"contact_email"`
-	// Phone is the merchant's own number, normalised to `+255XXXXXXXXX`
-	// by service.NormalizePhone. Added for §10.9: defolt-billing puts it
-	// on the Selcom checkout as `buyer_phone`, because the buyer on a
+	// Phone is the merchant's own number, normalised to E.164 by
+	// service.NormalisePhone. Added for §10.9: defolt-billing puts it on
+	// the Selcom checkout as `buyer_phone`, because the buyer on a
 	// subscription payment is the merchant paying it, not Defolt Labs.
 	//
-	// Nullable on purpose — rows created before this column existed have
-	// none, and billing falls back to DEFOLT_CLIENT_PHONE rather than
-	// failing the checkout (§0.2 rule 3). Not `not null` for the same
-	// reason: a NOT NULL added by AutoMigrate over existing rows is a
-	// migration failure, and AutoMigrate is non-fatal by fleet
-	// convention, so it would fail silently.
+	// **Required at the service layer, nullable in the column.** Those
+	// are not in tension — they are two different points in time. Every
+	// tenant created from 2026-08-15 must supply one (service.Create
+	// refuses otherwise); the column stays nullable because a NOT NULL
+	// added by AutoMigrate over pre-existing rows is a migration failure,
+	// and AutoMigrate is non-fatal by fleet convention, so it would fail
+	// silently and leave the column absent altogether.
+	//
+	// Historic rows were backfilled — see the §12.2 entry for row 13.7.
+	// If one is somehow still empty, billing sends an empty buyer_phone
+	// rather than substituting Defolt's number: wrong data on a
+	// merchant's payment record is worse than absent data, and the
+	// checkout must complete either way (§0.2 rule 3).
 	Phone        string    `gorm:"size:32" json:"phone,omitempty"`
 	Currency     string    `gorm:"size:8;default:'TZS'" json:"currency"`
 	Timezone     string    `gorm:"size:64;default:'Africa/Dar_es_Salaam'" json:"timezone"`

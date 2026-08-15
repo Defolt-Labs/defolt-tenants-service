@@ -22,9 +22,12 @@ type SignupInput struct {
 	Slug         string
 	Name         string // workspace / merchant name
 	ContactEmail string // becomes the initial Store Admin
-	// Phone is the merchant's own number. The signup form makes it
-	// required (§10.9 item 2); the server normalises it and carries on if
-	// it is absent, so an older client cannot be locked out of signup.
+	// Phone is the merchant's own number, and it is REQUIRED — enforced
+	// in Create, which this calls, so there is one place that decides it
+	// rather than two that can drift. §10.9 as amended by the owner on
+	// 2026-08-15: the DEFOLT_CLIENT_* globals are deleted, so a tenant
+	// created without a phone would have nothing behind it on the Selcom
+	// checkout.
 	Phone        string
 	FirstName    string
 	LastName     string
@@ -204,10 +207,19 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	}
 	// Carry the phone across a resume. The abandoned row may predate the
 	// column, or the merchant may have corrected the number on the retry;
-	// either way the value they just typed is the current one. Persist
-	// failures are swallowed on purpose — a resumed signup must still
-	// complete, and billing falls back if the phone is missing.
-	if p := NormalizePhone(in.Phone); p != "" && p != existing.Phone {
+	// either way the value they just typed is the current one.
+	//
+	// The number has already passed RequirePhone: this path is only
+	// reached after Create refused with ErrSlugTaken, and Create
+	// validates the phone before it ever looks at the slug. So a
+	// normalise failure here is not possible, and if it somehow were,
+	// keeping the row's existing number beats failing a resumed signup.
+	//
+	// Persist failures are swallowed on purpose for the same reason — a
+	// resumed signup must still complete. It leaves the row with a stale
+	// phone, not an absent one, because a resume implies the row already
+	// existed under the pre-13.7 code or with an earlier number.
+	if p, err := NormalisePhone(in.Phone); err == nil && p != "" && p != existing.Phone {
 		existing.Phone = p
 		if err := s.repo.Save(ctx, existing); err != nil {
 			logger.LogWarn("", "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
