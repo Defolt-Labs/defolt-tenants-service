@@ -4,6 +4,25 @@ when:
   - event: tag
 
 steps:
+  - name: test
+    # Runs on push AND tag, deliberately. Every other Go step in this
+    # file is gated on `event: push`, so a production tag skips them --
+    # which means this is the only check a tagged release gets, and a
+    # guard that a release can skip is not a guard.
+    #
+    # platformguard is the §9.1 coupling guard: it fails the build when a
+    # declared identifier in this platform service names a concept that
+    # belongs to one product's domain (till, sale, product, branch, sku,
+    # patient, practitioner, bed, prescription). §9.1's audit found six of
+    # seven platform services already clean; this is what keeps them that
+    # way, because the audit was a snapshot and nothing was checking it.
+    image: golang:1.25-alpine
+    commands:
+      - apk add --no-cache git
+      - go mod download
+      - go vet ./...
+      - go test ./... -count=1
+
   - name: build-image
     when:
       event: push
