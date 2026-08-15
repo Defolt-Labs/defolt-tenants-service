@@ -55,6 +55,12 @@ type CreateInput struct {
 	Slug         string
 	Name         string
 	ContactEmail string
+	// Phone is optional at this layer even though the signup form makes
+	// it required. Deliberate: the internal POST /api/v1/tenants is used
+	// by callers that predate the column, and refusing them would turn a
+	// missing field into a failed tenant creation. The form is where the
+	// requirement belongs; here it is normalised if present.
+	Phone        string
 	Currency     string
 	Timezone     string
 	CountryCode  string
@@ -77,6 +83,7 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 		Slug:         slug,
 		Name:         strings.TrimSpace(in.Name),
 		ContactEmail: strings.TrimSpace(in.ContactEmail),
+		Phone:        NormalizePhone(in.Phone),
 		Currency:     defaultStr(in.Currency, "TZS"),
 		Timezone:     defaultStr(in.Timezone, "Africa/Dar_es_Salaam"),
 		CountryCode:  defaultStr(in.CountryCode, "TZ"),
@@ -133,6 +140,7 @@ func (s *TenantsService) Get(ctx context.Context, id uuid.UUID) (*model.Tenant, 
 type UpdateInput struct {
 	Name         *string
 	ContactEmail *string
+	Phone        *string
 	Plan         *string
 }
 
@@ -150,6 +158,10 @@ func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInpu
 	}
 	if in.ContactEmail != nil && strings.TrimSpace(*in.ContactEmail) != "" {
 		t.ContactEmail = strings.TrimSpace(*in.ContactEmail)
+		changed = true
+	}
+	if in.Phone != nil && strings.TrimSpace(*in.Phone) != "" {
+		t.Phone = NormalizePhone(*in.Phone)
 		changed = true
 	}
 	if in.Plan != nil && strings.TrimSpace(*in.Plan) != "" {

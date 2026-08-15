@@ -85,6 +85,7 @@ type createBody struct {
 	Slug         string `json:"slug" binding:"required"`
 	Name         string `json:"name" binding:"required"`
 	ContactEmail string `json:"contact_email" binding:"required,email"`
+	Phone        string `json:"phone"`
 	Currency     string `json:"currency"`
 	Timezone     string `json:"timezone"`
 	CountryCode  string `json:"country_code"`
@@ -105,6 +106,7 @@ func (h *Handlers) Create(c *gin.Context) {
 		Slug:         body.Slug,
 		Name:         body.Name,
 		ContactEmail: body.ContactEmail,
+		Phone:        body.Phone,
 		Currency:     body.Currency,
 		Timezone:     body.Timezone,
 		CountryCode:  body.CountryCode,
@@ -171,6 +173,7 @@ func (h *Handlers) Get(c *gin.Context) {
 type patchBody struct {
 	Name         *string `json:"name"`
 	ContactEmail *string `json:"contact_email" binding:"omitempty,email"`
+	Phone        *string `json:"phone"`
 	Plan         *string `json:"plan"`
 }
 
@@ -188,6 +191,7 @@ func (h *Handlers) Patch(c *gin.Context) {
 	t, err := h.svc.Update(c, id, service.UpdateInput{
 		Name:         body.Name,
 		ContactEmail: body.ContactEmail,
+		Phone:        body.Phone,
 		Plan:         body.Plan,
 	})
 	if err != nil {
@@ -362,6 +366,12 @@ type signupBody struct {
 	Slug         string `json:"slug" binding:"required"`
 	Name         string `json:"name" binding:"required"`
 	ContactEmail string `json:"contact_email" binding:"required,email"`
+	// Not `binding:"required"` even though the form requires it. A hard
+	// server-side requirement would break every signup in the window
+	// between deploying this service and deploying the drs-vue form that
+	// sends the field — a self-inflicted signup outage, to gain nothing
+	// billing's fallback does not already cover (§10.9 item 5).
+	Phone        string `json:"phone"`
 	FirstName    string `json:"first_name" binding:"required"`
 	LastName     string `json:"last_name" binding:"required"`
 	CountryCode  string `json:"country_code"`
@@ -382,6 +392,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		Slug:         body.Slug,
 		Name:         body.Name,
 		ContactEmail: body.ContactEmail,
+		Phone:        body.Phone,
 		FirstName:    body.FirstName,
 		LastName:     body.LastName,
 		CountryCode:  body.CountryCode,

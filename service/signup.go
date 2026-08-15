@@ -22,6 +22,10 @@ type SignupInput struct {
 	Slug         string
 	Name         string // workspace / merchant name
 	ContactEmail string // becomes the initial Store Admin
+	// Phone is the merchant's own number. The signup form makes it
+	// required (§10.9 item 2); the server normalises it and carries on if
+	// it is absent, so an older client cannot be locked out of signup.
+	Phone        string
 	FirstName    string
 	LastName     string
 	CountryCode  string
@@ -64,6 +68,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		Slug:         in.Slug,
 		Name:         in.Name,
 		ContactEmail: in.ContactEmail,
+		Phone:        in.Phone,
 		CountryCode:  in.CountryCode,
 		Product:      "drs",
 		Plan:         "standard",
@@ -196,6 +201,17 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	}
 	if !strings.EqualFold(strings.TrimSpace(existing.ContactEmail), strings.TrimSpace(in.ContactEmail)) {
 		return nil, ErrSlugTaken
+	}
+	// Carry the phone across a resume. The abandoned row may predate the
+	// column, or the merchant may have corrected the number on the retry;
+	// either way the value they just typed is the current one. Persist
+	// failures are swallowed on purpose — a resumed signup must still
+	// complete, and billing falls back if the phone is missing.
+	if p := NormalizePhone(in.Phone); p != "" && p != existing.Phone {
+		existing.Phone = p
+		if err := s.repo.Save(ctx, existing); err != nil {
+			logger.LogWarn("", "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
+		}
 	}
 	return existing, nil
 }

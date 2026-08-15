@@ -42,6 +42,18 @@ type Tenant struct {
 	Slug         string    `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
 	Name         string    `gorm:"size:120;not null" json:"name"`
 	ContactEmail string    `gorm:"size:180;not null" json:"contact_email"`
+	// Phone is the merchant's own number, normalised to `+255XXXXXXXXX`
+	// by service.NormalizePhone. Added for §10.9: defolt-billing puts it
+	// on the Selcom checkout as `buyer_phone`, because the buyer on a
+	// subscription payment is the merchant paying it, not Defolt Labs.
+	//
+	// Nullable on purpose — rows created before this column existed have
+	// none, and billing falls back to DEFOLT_CLIENT_PHONE rather than
+	// failing the checkout (§0.2 rule 3). Not `not null` for the same
+	// reason: a NOT NULL added by AutoMigrate over existing rows is a
+	// migration failure, and AutoMigrate is non-fatal by fleet
+	// convention, so it would fail silently.
+	Phone        string    `gorm:"size:32" json:"phone,omitempty"`
 	Currency     string    `gorm:"size:8;default:'TZS'" json:"currency"`
 	Timezone     string    `gorm:"size:64;default:'Africa/Dar_es_Salaam'" json:"timezone"`
 	CountryCode  string    `gorm:"size:2;default:'TZ'" json:"country_code"`
