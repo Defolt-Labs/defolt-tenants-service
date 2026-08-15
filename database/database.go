@@ -45,4 +45,36 @@ func EnsureSchema(db *gorm.DB, cfg *config.Config) {
 	if err := db.AutoMigrate(&model.Tenant{}); err != nil {
 		logger.LogWarn("", "db-migrate", fmt.Sprintf("AutoMigrate Tenant: %v", err))
 	}
+	retireGlobalSlugIndex(db)
+}
+
+// retireGlobalSlugIndex drops `idx_tenants_slug`, the old UNIQUE(slug)
+// index gorm created from the bare `uniqueIndex` tag on Tenant.Slug.
+//
+// AutoMigrate above creates the replacement, ux_tenants_product_slug on
+// (product, slug), but it will never drop the old one: gorm adds indexes
+// and does not remove indexes a model no longer declares. Left in place
+// the old index keeps enforcing GLOBAL slug uniqueness, so the composite
+// index would be dead weight and the bug would look fixed while behaving
+// exactly as before.
+//
+// The drop is guarded on the replacement actually existing. If
+// AutoMigrate failed — it is non-fatal by fleet convention and only logs
+// a warning — dropping the old index unguarded would leave the table with
+// NO uniqueness on slug at all, which is far worse than the constraint
+// being too strict. Order matters here and the guard enforces it
+// regardless of what happened above.
+func retireGlobalSlugIndex(db *gorm.DB) {
+	const stmt = `DO $$
+BEGIN
+	IF EXISTS (SELECT 1 FROM pg_indexes
+	           WHERE tablename = 'tenants' AND indexname = 'ux_tenants_product_slug')
+	   AND EXISTS (SELECT 1 FROM pg_indexes
+	               WHERE tablename = 'tenants' AND indexname = 'idx_tenants_slug') THEN
+		EXECUTE 'DROP INDEX idx_tenants_slug';
+	END IF;
+END $$`
+	if err := db.Exec(stmt).Error; err != nil {
+		logger.LogWarn("", "db-tenant-index", fmt.Sprintf("retire idx_tenants_slug: %v", err))
+	}
 }

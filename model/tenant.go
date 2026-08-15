@@ -35,7 +35,11 @@ const (
 // cluster, so no per-region column.
 type Tenant struct {
 	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	Slug         string    `gorm:"size:32;uniqueIndex;not null" json:"slug"`
+	// Slug is unique per PRODUCT, not globally — see the composite
+	// index on Product below. `jamii.drs.defoltlabs.com` and
+	// `jamii.afya.defoltlabs.com` never collide in DNS, so the database
+	// had no business refusing the second tenant.
+	Slug         string    `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
 	Name         string    `gorm:"size:120;not null" json:"name"`
 	ContactEmail string    `gorm:"size:180;not null" json:"contact_email"`
 	Currency     string    `gorm:"size:8;default:'TZS'" json:"currency"`
@@ -44,7 +48,10 @@ type Tenant struct {
 	// Product identifies which vertical the tenant belongs to (drs,
 	// nyaraka, vinono). Multi-product signup is a Phase 3+ decision
 	// (§4.3) — for Phase 1 a tenant is single-product.
-	Product string `gorm:"size:32;default:'drs';index" json:"product"`
+	// Leads the (product, slug) unique index. Priority 1 so the index is
+	// also usable on its own for product-scoped listing, which is why the
+	// standalone `index` tag is gone: it would be a redundant prefix.
+	Product string `gorm:"size:32;default:'drs';uniqueIndex:ux_tenants_product_slug,priority:1" json:"product"`
 	// Plan is the single flat plan slug per §8.2 (`standard`). Kept
 	// as a string column so a future tiered offering can extend it
 	// without a migration.
