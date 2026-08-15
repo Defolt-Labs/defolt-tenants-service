@@ -80,6 +80,14 @@ steps:
       target: /tmp/${CI_REPO_NAME}-${CI_COMMIT_TAG}
       overwrite: true
 
+  # charts/values.yaml is the UAT file, so anything environment-specific has
+  # to be overridden here. TENANT_BASE_DOMAIN is overridden for honesty, not
+  # for effect: measured 2026-08-15, no Go code in this service reads it
+  # (config.go never calls getStr("TENANT_BASE_DOMAIN")), so the UAT value
+  # sitting on production was misleading rather than broken. Do not add
+  # behaviour that depends on it without re-checking that.
+  # RESERVED_SLUGS still carries the UAT list; growing it is §5.10's work and
+  # it needs comma escaping in --set.
   - name: deploy-prod
     image: appleboy/drone-ssh
     when:
@@ -98,6 +106,7 @@ steps:
             --set image.tag=${CI_COMMIT_TAG}
             --set ingress.host=defolt.api.defoltlabs.com
             --set ingress.tls.secretName=defolt-api-tls
+            --set env.TENANT_BASE_DOMAIN=drs.defoltlabs.com
             --wait --timeout 3m
         - rm -rf /tmp/${CI_REPO_NAME}-${CI_COMMIT_TAG}
 
