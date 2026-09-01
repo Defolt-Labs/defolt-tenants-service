@@ -397,6 +397,9 @@ type signupBody struct {
 	CountryCode  string `json:"country_code"`
 	TurnstileTok string `json:"turnstile_token"`
 	RedirectURL  string `json:"redirect_url"`
+	// Product selects the fleet product (default "drs"). "health" (DHS) skips
+	// billing and auto-activates — see service.PublicSignup.
+	Product      string `json:"product"`
 }
 
 func (h *Handlers) PublicSignup(c *gin.Context) {
@@ -418,6 +421,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		CountryCode:  body.CountryCode,
 		TurnstileTok: body.TurnstileTok,
 		RedirectURL:  body.RedirectURL,
+		Product:      body.Product,
 		ClientIP:     c.ClientIP(),
 	}, h.ts)
 	if err != nil {

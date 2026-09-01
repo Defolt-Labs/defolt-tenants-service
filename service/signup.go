@@ -35,6 +35,13 @@ type SignupInput struct {
 	TurnstileTok string
 	RedirectURL  string
 	ClientIP     string
+	// Product selects the fleet product this signup provisions. Defaults to
+	// "drs" (retail) when empty, preserving the original behaviour. "health"
+	// (DHS) is a non-billed product: instead of a Selcom registration checkout
+	// it auto-activates on signup and emits tenant.activated, which dhs-setup
+	// consumes to provision the Facility Admin. Other values are accepted but
+	// follow the drs (paid) path.
+	Product string
 }
 
 // SignupResult is what the marketing form gets back: the tenant plus
@@ -67,13 +74,20 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		return nil, ErrValidation
 	}
 
+	// Product selects the fleet product (default "drs"). Every product goes
+	// through the same paid registration flow — pending_payment, a Selcom
+	// registration checkout, and activation on payment — so a health facility
+	// pays to activate exactly as a retail store does; only the namespace on the
+	// tenant differs (and downstream, which consumer picks up tenant.activated).
+	product := defaultStr(in.Product, "drs")
+
 	t, err := s.Create(ctx, CreateInput{
 		Slug:         in.Slug,
 		Name:         in.Name,
 		ContactEmail: in.ContactEmail,
 		Phone:        in.Phone,
 		CountryCode:  in.CountryCode,
-		Product:      "drs",
+		Product:      product,
 		Plan:         "standard",
 	})
 	if err != nil {
@@ -174,7 +188,10 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	}
 
 	// Registration checkout. Non-fatal: an empty payment_url tells the
-	// frontend to surface the resend-payment-link path.
+	// frontend to surface the resend-payment-link path. On payment, defolt-
+	// billing calls back /internal/tenants/:id/activate, which flips the tenant
+	// active and emits tenant.activated — dhs-setup's consumer then provisions
+	// the Facility Admin for a health tenant (drs-setup for a store).
 	if s.billing != nil {
 		if billErr != nil {
 			logger.LogWarn("", "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))

@@ -24,6 +24,9 @@ var allowedIdentifiers = map[string]string{
 		"namespace through to model.Tenant.Product",
 	"service/service.go::Product": "SignupInput field carrying the product " +
 		"namespace through to model.Tenant.Product",
+	"service/signup.go::Product": "SignupInput field carrying the product " +
+		"namespace (drs/health) into the signup flow — selects the paid vs " +
+		"auto-activate path, not a retail product",
 	"middleware/middleware.go::TenantProductHeader": "X-Defolt-Tenant-Product " +
 		"names the product namespace Traefik resolved, not a retail product",
 	"middleware/middleware.go::X-Defolt-Tenant-Product": "the header value of " +
