@@ -38,7 +38,12 @@ func (r *Repo) Insert(ctx context.Context, t *model.Tenant) error {
 	// index on slug still catches concurrent writes as a fallback.
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing model.Tenant
-		if err := tx.Where("slug = ?", t.Slug).First(&existing).Error; err == nil {
+		// Scope the pre-check to (product, slug) to match the composite
+		// unique index ux_tenants_product_slug. A bare `slug = ?` check
+		// rejected a `health` signup whenever a `drs` tenant already held
+		// the same slug — a cross-product false collision the schema
+		// explicitly permits (jamii.drs and jamii.afya must coexist).
+		if err := tx.Where("product = ? AND slug = ?", t.Product, t.Slug).First(&existing).Error; err == nil {
 			return ErrSlugTaken
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -64,13 +69,16 @@ func (r *Repo) FindByID(ctx context.Context, id uuid.UUID) (*model.Tenant, error
 	return &t, err
 }
 
-// FindBySlug returns the tenant matching slug (case-insensitive).
-// Used by the forward-auth /internal/resolve-host endpoint on every
-// request — Redis caches the result upstream.
-func (r *Repo) FindBySlug(ctx context.Context, slug string) (*model.Tenant, error) {
+// FindBySlug returns the tenant matching (product, slug), case-insensitive
+// on the slug. Used by the forward-auth /internal/resolve-host endpoint on
+// every request — Redis caches the result upstream. Scoped by product
+// because slugs are unique only per product (ux_tenants_product_slug); a
+// bare-slug lookup would return an arbitrary row once two products reuse a
+// slug. Callers normalize product (default "drs") before calling.
+func (r *Repo) FindBySlug(ctx context.Context, product, slug string) (*model.Tenant, error) {
 	var t model.Tenant
 	err := r.db.WithContext(ctx).
-		Where("LOWER(slug) = LOWER(?)", strings.TrimSpace(slug)).
+		Where("product = ? AND LOWER(slug) = LOWER(?)", product, strings.TrimSpace(slug)).
 		First(&t).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound

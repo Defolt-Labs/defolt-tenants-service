@@ -36,11 +36,15 @@ type SignupInput struct {
 	RedirectURL  string
 	ClientIP     string
 	// Product selects the fleet product this signup provisions. Defaults to
-	// "drs" (retail) when empty, preserving the original behaviour. "health"
-	// (DHS) is a non-billed product: instead of a Selcom registration checkout
-	// it auto-activates on signup and emits tenant.activated, which dhs-setup
-	// consumes to provision the Facility Admin. Other values are accepted but
-	// follow the drs (paid) path.
+	// "drs" (retail) when empty, preserving the original behaviour. EVERY
+	// product — "health" (DHS) included — goes through the SAME paid path:
+	// the tenant is created pending_payment, a Selcom registration checkout
+	// is issued, and only on payment does billing drive activation and the
+	// tenant.activated event that dhs-setup (health) / drs-setup (retail)
+	// consume to provision the owner. There is no auto-activate/skip-billing
+	// branch for any product; only the tenant namespace and the downstream
+	// consumer differ. (An earlier comment here claimed health skipped
+	// billing — it never did; see PublicSignup, which has no product branch.)
 	Product string
 }
 
@@ -212,7 +216,10 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 // guessing their slug.
 func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput) (*model.Tenant, error) {
 	slug := strings.ToLower(strings.TrimSpace(in.Slug))
-	existing, err := s.repo.FindBySlug(ctx, slug)
+	// Scope the resume lookup to the same product namespace the retry is
+	// for, matching the (product, slug) uniqueness. A drs tenant on the
+	// same slug must not be mistaken for this health signup's stalled row.
+	existing, err := s.repo.FindBySlug(ctx, NormalizeProduct(in.Product), slug)
 	if err != nil {
 		return nil, ErrSlugTaken
 	}

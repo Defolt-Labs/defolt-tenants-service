@@ -31,6 +31,18 @@ var allowedIdentifiers = map[string]string{
 		"names the product namespace Traefik resolved, not a retail product",
 	"middleware/middleware.go::X-Defolt-Tenant-Product": "the header value of " +
 		"TenantProductHeader above",
+	"middleware/middleware.go::ProductHeader": "X-Defolt-Product is the request-" +
+		"side product-namespace signal (drs/health) the edge sends so slug " +
+		"resolution can be scoped — the namespace, not a retail product",
+	"middleware/middleware.go::X-Defolt-Product": "the header value of " +
+		"ProductHeader above",
+	"service/product.go::DefaultProduct": "the fleet's default product namespace " +
+		"(drs) that slug resolution falls back to — the namespace, not a shelf item",
+	"service/product.go::NormalizeProduct": "normalizes a product-namespace string " +
+		"(lowercase/trim, default drs) for slug scoping — the namespace, not a retail product",
+	"handler/product_host.go::productFromHost": "derives the product namespace " +
+		"(drs/health) from the request host/header so slug resolution is scoped — " +
+		"the namespace, not a retail product",
 }
 
 // knownCoupling is the debt ledger: product vocabulary that is real,

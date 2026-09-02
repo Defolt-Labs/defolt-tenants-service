@@ -17,6 +17,12 @@ const (
 	TenantSlugHeader    = "X-Defolt-Tenant-Slug"
 	TenantProductHeader = "X-Defolt-Tenant-Product"
 	TenantStatusHeader  = "X-Defolt-Tenant-Status"
+	// ProductHeader is the REQUEST-side product signal the edge sends so
+	// slug resolution can be scoped per product. Distinct from the
+	// response-side TenantProductHeader (service → downstream): this one
+	// is edge/caller → this service. Set it on a per-product ingress; the
+	// host suffix is the fallback when it is absent.
+	ProductHeader = "X-Defolt-Product"
 )
 
 func RequestID() gin.HandlerFunc {
@@ -79,7 +85,7 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Internal-Service-Key, Idempotency-Key")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Internal-Service-Key, Idempotency-Key, X-Defolt-Product")
 		c.Header("Access-Control-Max-Age", "600")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

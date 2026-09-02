@@ -122,21 +122,22 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 // on every request. Tries the shared Redis cache first (30s TTL, plan
 // §5.3/§5.13); on miss reads Postgres and repopulates the cache.
 // Returns the slim projection — the only shape the hot path needs.
-func (s *TenantsService) ResolveBySlug(ctx context.Context, slug string) (*model.TenantSlim, error) {
+func (s *TenantsService) ResolveBySlug(ctx context.Context, product, slug string) (*model.TenantSlim, error) {
+	product = NormalizeProduct(product)
 	slug = strings.ToLower(strings.TrimSpace(slug))
-	if b, ok := s.cache.GetSlug(ctx, slug); ok {
+	if b, ok := s.cache.GetSlug(ctx, product, slug); ok {
 		var slim model.TenantSlim
 		if err := json.Unmarshal(b, &slim); err == nil {
 			return &slim, nil
 		}
 	}
-	t, err := s.repo.FindBySlug(ctx, slug)
+	t, err := s.repo.FindBySlug(ctx, product, slug)
 	if err != nil {
 		return nil, err
 	}
 	slim := t.Slim()
 	if b, err := json.Marshal(slim); err == nil {
-		s.cache.SetSlug(ctx, slug, b)
+		s.cache.SetSlug(ctx, product, slug, b)
 	}
 	return &slim, nil
 }
@@ -197,7 +198,7 @@ func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInpu
 	if err := s.repo.Save(ctx, t); err != nil {
 		return nil, err
 	}
-	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
 	s.emit("tenant.updated", map[string]any{
 		"tenant_id": t.ID,
 		"slug":      t.Slug,
@@ -217,7 +218,7 @@ func (s *TenantsService) Suspend(ctx context.Context, id uuid.UUID) (*model.Tena
 	if err != nil {
 		return nil, err
 	}
-	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
 	payload := map[string]any{
 		"tenant_id": t.ID,
 		"slug":      t.Slug,
@@ -237,7 +238,7 @@ func (s *TenantsService) Restore(ctx context.Context, id uuid.UUID) (*model.Tena
 	if err != nil {
 		return nil, err
 	}
-	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
 	payload := map[string]any{
 		"tenant_id": t.ID,
 		"slug":      t.Slug,
@@ -267,7 +268,7 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	if err := s.repo.Save(ctx, t); err != nil {
 		return nil, err
 	}
-	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
 	// Carry the owner identity so a DRS consumer can provision the owner's
 	// user_mirror on activation and let them log in. Signup persists
 	// OwnerUserID/OwnerEmail on the tenant; without them here nothing
@@ -315,7 +316,7 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 	if err := s.repo.Save(ctx, t); err != nil {
 		return nil, err
 	}
-	s.cache.InvalidateSlug(ctx, t.Slug)
+	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
 	s.emit("tenant.status_changed", map[string]any{
 		"tenant_id":        t.ID,
 		"slug":             t.Slug,
@@ -465,7 +466,7 @@ func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 		if err := s.repo.HardDelete(ctx, t.ID); err != nil {
 			continue
 		}
-		s.cache.InvalidateSlug(ctx, t.Slug)
+		s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
 		s.emit("tenant.abandoned", map[string]any{
 			"tenant_id": t.ID,
 			"slug":      t.Slug,

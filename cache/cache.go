@@ -57,15 +57,20 @@ func (c *Cache) Close() {
 	_ = c.rdb.Close()
 }
 
-func slugKey(slug string) string { return "tenant:slug:" + slug }
+// slugKey is keyed by (product, slug), not slug alone: tenant slugs are
+// unique only per product, so a bare-slug key would cross-serve a `drs`
+// tenant's slim record to a `health` request that reused the same slug
+// (or vice versa) for the 30s TTL. The product segment keeps the two
+// namespaces from poisoning each other.
+func slugKey(product, slug string) string { return "tenant:slug:" + product + ":" + slug }
 
-// GetSlug returns the cached slim-tenant JSON for a slug, or (nil,
-// false) on miss / cache-less operation.
-func (c *Cache) GetSlug(ctx context.Context, slug string) ([]byte, bool) {
+// GetSlug returns the cached slim-tenant JSON for a (product, slug), or
+// (nil, false) on miss / cache-less operation.
+func (c *Cache) GetSlug(ctx context.Context, product, slug string) ([]byte, bool) {
 	if c == nil || c.rdb == nil {
 		return nil, false
 	}
-	b, err := c.rdb.Get(ctx, slugKey(slug)).Bytes()
+	b, err := c.rdb.Get(ctx, slugKey(product, slug)).Bytes()
 	if err != nil {
 		return nil, false
 	}
@@ -73,23 +78,23 @@ func (c *Cache) GetSlug(ctx context.Context, slug string) ([]byte, bool) {
 }
 
 // SetSlug stores the slim-tenant JSON with the 30s TTL. Best effort.
-func (c *Cache) SetSlug(ctx context.Context, slug string, body []byte) {
+func (c *Cache) SetSlug(ctx context.Context, product, slug string, body []byte) {
 	if c == nil || c.rdb == nil {
 		return
 	}
-	if err := c.rdb.Set(ctx, slugKey(slug), body, slugTTL).Err(); err != nil {
-		logger.LogWarn("", "cache", "SET "+slugKey(slug)+": "+err.Error())
+	if err := c.rdb.Set(ctx, slugKey(product, slug), body, slugTTL).Err(); err != nil {
+		logger.LogWarn("", "cache", "SET "+slugKey(product, slug)+": "+err.Error())
 	}
 }
 
 // InvalidateSlug drops the cached entry. Shared Redis means one DEL
 // serves every replica.
-func (c *Cache) InvalidateSlug(ctx context.Context, slug string) {
+func (c *Cache) InvalidateSlug(ctx context.Context, product, slug string) {
 	if c == nil || c.rdb == nil {
 		return
 	}
-	if err := c.rdb.Del(ctx, slugKey(slug)).Err(); err != nil {
-		logger.LogWarn("", "cache", "DEL "+slugKey(slug)+": "+err.Error())
+	if err := c.rdb.Del(ctx, slugKey(product, slug)).Err(); err != nil {
+		logger.LogWarn("", "cache", "DEL "+slugKey(product, slug)+": "+err.Error())
 	}
 }
 

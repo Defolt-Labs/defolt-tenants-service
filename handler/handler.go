@@ -138,10 +138,19 @@ func (h *Handlers) Create(c *gin.Context) {
 
 func (h *Handlers) GetBySlug(c *gin.Context) {
 	slug := c.Param("slug")
+	// Slugs are unique per product, so scope the lookup. The product
+	// comes from ?product= (or the X-Defolt-Product header) and defaults
+	// to "drs" — drs-vue, the only current caller, sends neither and must
+	// keep resolving DRS tenants exactly as before.
+	product := c.Query("product")
+	if product == "" {
+		product = c.GetHeader(middleware.ProductHeader)
+	}
+	product = service.NormalizeProduct(product)
 	// Public endpoint returns the slim projection — never expose the
 	// full tenant record (contact email, timestamps) to anonymous
 	// callers. Redis fronts this lookup with a 30s TTL.
-	t, err := h.svc.ResolveBySlug(c, slug)
+	t, err := h.svc.ResolveBySlug(c, product, slug)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
@@ -397,8 +406,9 @@ type signupBody struct {
 	CountryCode  string `json:"country_code"`
 	TurnstileTok string `json:"turnstile_token"`
 	RedirectURL  string `json:"redirect_url"`
-	// Product selects the fleet product (default "drs"). "health" (DHS) skips
-	// billing and auto-activates — see service.PublicSignup.
+	// Product selects the fleet product (default "drs"). All products,
+	// health included, go through the same paid registration checkout —
+	// see service.PublicSignup (there is no skip-billing branch).
 	Product      string `json:"product"`
 }
 
@@ -547,7 +557,13 @@ func (h *Handlers) ResolveHost(c *gin.Context) {
 		c.Status(http.StatusForbidden)
 		return
 	}
-	t, err := h.svc.ResolveBySlug(c, slug)
+	// Slugs are unique only per product, so resolution must be scoped.
+	// The edge tells us the product either explicitly (X-Defolt-Product,
+	// the durable signal for a per-product ingress) or implicitly via the
+	// host suffix (.drs./.shop. = drs today). Unknown hosts default drs,
+	// preserving the original single-product behaviour.
+	product := productFromHost(host, c.GetHeader(middleware.ProductHeader))
+	t, err := h.svc.ResolveBySlug(c, product, slug)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			// Unknown slug: 200 with status "unknown" and no tenant
