@@ -56,7 +56,8 @@ type SignupResult struct {
 	Tenant          *model.Tenant
 	OneTimePassword string
 	PaymentURL      string
-	AmountTZS       float64
+	// Whole shillings, int64. See CheckoutResult.AmountTZS.
+	AmountTZS int64
 	// OwnerExisting says the contact email already had a Defolt account,
 	// so no one-time password was issued and the owner signs in with the
 	// credential they already have. See the CreateUser call below.

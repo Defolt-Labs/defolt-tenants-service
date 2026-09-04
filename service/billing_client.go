@@ -33,12 +33,28 @@ func NewBillingClient(baseURL, internalKey string) *BillingClient {
 
 // CheckoutResult mirrors the envelope data of
 // POST {billing}/api/v1/internal/tenants/{id}/checkout.
+//
+// AmountTZS is int64 WHOLE SHILLINGS. It was float64 until 2026-09-04,
+// which was the one float on a money path anywhere in this fleet.
+// Billing produces it as int64 the whole way down -- plan.RegistrationCents
+// / 100 into model.Invoice.AmountTZS int64, out through
+// service.CheckoutView.AmountTZS int64 -- and
+// Libraries/defolt-kit/money declares the fleet type as `Money int64`,
+// whole shillings, naming these float64 amount_tzs DTO fields as the
+// drift it retires. Libraries/defolt-contracts/payment already declares
+// SelcomPaymentEvent.AmountTZS int64.
+//
+// The change is wire-compatible: JSON has one number type, so the field
+// name and the emitted bytes are identical for any integral value and no
+// deploy ordering is required. Billing stores int64 and so cannot emit a
+// fraction; if it ever did, this now fails the unmarshal loudly instead
+// of rounding silently, and CreateCheckout's error is already non-fatal.
 type CheckoutResult struct {
-	InvoiceID  string  `json:"invoice_id"`
-	AmountTZS  float64 `json:"amount_tzs"`
-	PaymentURL string  `json:"payment_url"`
-	Reference  string  `json:"reference"`
-	ExpiresAt  string  `json:"expires_at"`
+	InvoiceID  string `json:"invoice_id"`
+	AmountTZS  int64  `json:"amount_tzs"`
+	PaymentURL string `json:"payment_url"`
+	Reference  string `json:"reference"`
+	ExpiresAt  string `json:"expires_at"`
 }
 
 // CreateCheckout asks billing for a Selcom checkout URL covering the
