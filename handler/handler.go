@@ -90,12 +90,12 @@ type createBody struct {
 	// on the Selcom checkout. service.RequirePhone does the real
 	// validation and produces the message the caller is shown; this tag
 	// only catches the field being absent entirely.
-	Phone        string `json:"phone" binding:"required"`
-	Currency     string `json:"currency"`
-	Timezone     string `json:"timezone"`
-	CountryCode  string `json:"country_code"`
-	Product      string `json:"product"`
-	Plan         string `json:"plan"`
+	Phone       string `json:"phone" binding:"required"`
+	Currency    string `json:"currency"`
+	Timezone    string `json:"timezone"`
+	CountryCode string `json:"country_code"`
+	Product     string `json:"product"`
+	Plan        string `json:"plan"`
 }
 
 func (h *Handlers) Create(c *gin.Context) {
@@ -400,8 +400,13 @@ type signupBody struct {
 	// by weakening the contract: drs-vue ships the field to an
 	// environment BEFORE this service starts insisting on it. See the
 	// §12.2 entry for row 13.7.
-	Phone        string `json:"phone" binding:"required"`
+	Phone string `json:"phone" binding:"required"`
+	// Three name parts, not one free-text field split on whitespace. Health is a
+	// KYC setting and the clinical audit trail names the actor, so the person's
+	// legal name is collected as it is written. MiddleName is optional; the other
+	// two are required, as they were.
 	FirstName    string `json:"first_name" binding:"required"`
+	MiddleName   string `json:"middle_name"`
 	LastName     string `json:"last_name" binding:"required"`
 	CountryCode  string `json:"country_code"`
 	TurnstileTok string `json:"turnstile_token"`
@@ -409,7 +414,7 @@ type signupBody struct {
 	// Product selects the fleet product (default "drs"). All products,
 	// health included, go through the same paid registration checkout —
 	// see service.PublicSignup (there is no skip-billing branch).
-	Product      string `json:"product"`
+	Product string `json:"product"`
 }
 
 func (h *Handlers) PublicSignup(c *gin.Context) {
@@ -427,6 +432,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		ContactEmail: body.ContactEmail,
 		Phone:        body.Phone,
 		FirstName:    body.FirstName,
+		MiddleName:   body.MiddleName,
 		LastName:     body.LastName,
 		CountryCode:  body.CountryCode,
 		TurnstileTok: body.TurnstileTok,
@@ -450,9 +456,9 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		return
 	}
 	h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, gin.H{
-		"id":                res.Tenant.ID,
-		"slug":              res.Tenant.Slug,
-		"status":            res.Tenant.Status,
+		"id":     res.Tenant.ID,
+		"slug":   res.Tenant.Slug,
+		"status": res.Tenant.Status,
 		// Empty when owner_existing is true: identity kept the password
 		// the owner already has rather than taking the generated one, so
 		// there is nothing to show them.

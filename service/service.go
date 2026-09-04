@@ -67,12 +67,12 @@ type CreateInput struct {
 	//
 	// Refused input is a 400 with a readable reason (see RequirePhone),
 	// never a silently empty column.
-	Phone        string
-	Currency     string
-	Timezone     string
-	CountryCode  string
-	Product      string
-	Plan         string
+	Phone       string
+	Currency    string
+	Timezone    string
+	CountryCode string
+	Product     string
+	Plan        string
 }
 
 func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Tenant, error) {
@@ -275,13 +275,20 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	// downstream could tie the activated tenant to its Store Admin — the
 	// onboarding "sealed room" this closes.
 	s.emit("tenant.activated", map[string]any{
-		"tenant_id":       t.ID,
-		"slug":            t.Slug,
-		"name":            t.Name,
-		"owner_user_id":   t.OwnerUserID,
-		"owner_email":     t.OwnerEmail,
-		"trial_starts_at": now,
-		"trial_ends_at":   trialEnd,
+		"tenant_id":     t.ID,
+		"slug":          t.Slug,
+		"name":          t.Name,
+		"owner_user_id": t.OwnerUserID,
+		"owner_email":   t.OwnerEmail,
+		// The PERSON's name, so the consuming product can create its first staff
+		// record under it. `name` above is the FACILITY's name; dhs-setup used to
+		// fall back to that and made the facility admin a staff member called
+		// after the clinic. PHI-free: a tenant owner is a business contact.
+		"owner_first_name":  t.OwnerFirstName,
+		"owner_middle_name": t.OwnerMiddleName,
+		"owner_last_name":   t.OwnerLastName,
+		"trial_starts_at":   now,
+		"trial_ends_at":     trialEnd,
 	})
 	return t, nil
 }
@@ -331,11 +338,16 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 			"name":          t.Name,
 			"owner_user_id": t.OwnerUserID,
 			"owner_email":   t.OwnerEmail,
+			// See the activate path: the person's name, not the facility's.
+			"owner_first_name":  t.OwnerFirstName,
+			"owner_middle_name": t.OwnerMiddleName,
+			"owner_last_name":   t.OwnerLastName,
 		})
 	}
 
 	return t, nil
 }
+
 // ReissueOwnerOTP generates a fresh one-time password for the tenant's
 // Store Admin and pushes it to identity's internal reset-password
 // endpoint. When owner_user_id was never stored (old rows, identity

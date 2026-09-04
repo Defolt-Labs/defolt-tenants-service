@@ -30,6 +30,7 @@ type SignupInput struct {
 	// checkout.
 	Phone        string
 	FirstName    string
+	MiddleName   string
 	LastName     string
 	CountryCode  string
 	TurnstileTok string
@@ -120,6 +121,14 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	out := &SignupResult{Tenant: t}
 	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
 	out.OwnerEmail = t.OwnerEmail
+	// Keep the owner's legal name on the tenant. It rides on tenant.activated so
+	// the product can create its first staff record under the PERSON's name;
+	// without it dhs-setup fell back to the tenant's own Name, which made the
+	// facility admin of "Rani Dental Clinic" a staff member called after the
+	// clinic rather than after the dentist.
+	t.OwnerFirstName = strings.TrimSpace(in.FirstName)
+	t.OwnerMiddleName = strings.TrimSpace(in.MiddleName)
+	t.OwnerLastName = strings.TrimSpace(in.LastName)
 
 	// Store Admin provisioning (defolt-identity) and registration
 	// checkout (defolt-billing, which itself reaches defolt-payment and
@@ -146,10 +155,11 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 			defer wg.Done()
 			identityPassword = generatePassword()
 			identityUserID, identityExisted, identityErr = s.identity.CreateUser(ctx, RegisterInput{
-				Email:     in.ContactEmail,
-				FirstName: in.FirstName,
-				LastName:  in.LastName,
-				Password:  identityPassword,
+				Email:      in.ContactEmail,
+				FirstName:  in.FirstName,
+				MiddleName: in.MiddleName,
+				LastName:   in.LastName,
+				Password:   identityPassword,
 			})
 		}()
 	}

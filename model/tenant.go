@@ -34,14 +34,14 @@ const (
 // Plan (Phase 4 dropped `region`): everything runs in a single k3s
 // cluster, so no per-region column.
 type Tenant struct {
-	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	// Slug is unique per PRODUCT, not globally — see the composite
 	// index on Product below. `jamii.drs.defoltlabs.com` and
 	// `jamii.afya.defoltlabs.com` never collide in DNS, so the database
 	// had no business refusing the second tenant.
-	Slug         string    `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
-	Name         string    `gorm:"size:120;not null" json:"name"`
-	ContactEmail string    `gorm:"size:180;not null" json:"contact_email"`
+	Slug         string `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
+	Name         string `gorm:"size:120;not null" json:"name"`
+	ContactEmail string `gorm:"size:180;not null" json:"contact_email"`
 	// Phone is the merchant's own number, normalised to E.164 by
 	// service.NormalisePhone. Added for §10.9: defolt-billing puts it on
 	// the Selcom checkout as `buyer_phone`, because the buyer on a
@@ -60,10 +60,10 @@ type Tenant struct {
 	// rather than substituting Defolt's number: wrong data on a
 	// merchant's payment record is worse than absent data, and the
 	// checkout must complete either way (§0.2 rule 3).
-	Phone        string    `gorm:"size:32" json:"phone,omitempty"`
-	Currency     string    `gorm:"size:8;default:'TZS'" json:"currency"`
-	Timezone     string    `gorm:"size:64;default:'Africa/Dar_es_Salaam'" json:"timezone"`
-	CountryCode  string    `gorm:"size:2;default:'TZ'" json:"country_code"`
+	Phone       string `gorm:"size:32" json:"phone,omitempty"`
+	Currency    string `gorm:"size:8;default:'TZS'" json:"currency"`
+	Timezone    string `gorm:"size:64;default:'Africa/Dar_es_Salaam'" json:"timezone"`
+	CountryCode string `gorm:"size:2;default:'TZ'" json:"country_code"`
 	// Product identifies which vertical the tenant belongs to (drs,
 	// nyaraka, vinono). Multi-product signup is a Phase 3+ decision
 	// (§4.3) — for Phase 1 a tenant is single-product.
@@ -84,6 +84,20 @@ type Tenant struct {
 	// endpoint backfills it lazily via identity's by-email lookup.
 	OwnerUserID *uuid.UUID `gorm:"type:uuid" json:"owner_user_id,omitempty"`
 	OwnerEmail  string     `gorm:"size:180" json:"owner_email,omitempty"`
+
+	// The owner's legal name, kept as three parts rather than one string.
+	// Health is a KYC and audit setting: a clinical record's actor has to be a
+	// named person, and "split the first whitespace token off" is a guess that
+	// turns "Dr. Rachel Mhaville" into a first name of "Dr.". Middle name is
+	// optional because not everyone has one; first and last are not.
+	//
+	// These ride on tenant.activated so the product that consumes it can create
+	// its staff mirror under the PERSON's name. dhs-setup previously fell back to
+	// the tenant's own Name for that, which made the facility admin of "Rani
+	// Dental Clinic" a staff member called "Rani Dental Clinic".
+	OwnerFirstName  string `gorm:"size:80" json:"owner_first_name,omitempty"`
+	OwnerMiddleName string `gorm:"size:80" json:"owner_middle_name,omitempty"`
+	OwnerLastName   string `gorm:"size:80" json:"owner_last_name,omitempty"`
 
 	// TrialStartsAt / TrialEndsAt bracket the 7-day free window that
 	// unlocks on registration-payment confirmation. Filled in by the

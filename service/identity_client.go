@@ -35,10 +35,11 @@ func NewIdentityClient(baseURL, internalKey, platform string) *IdentityClient {
 }
 
 type RegisterInput struct {
-	Email     string
-	FirstName string
-	LastName  string
-	Password  string // generated on the tenants side; user resets on first login
+	Email      string
+	FirstName  string
+	MiddleName string
+	LastName   string
+	Password   string // generated on the tenants side; user resets on first login
 }
 
 // identityUser covers the envelope shapes identity returns: the
@@ -139,10 +140,11 @@ func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uui
 	raw, err := c.do(ctx, http.MethodPost, "/api/v1/internal/admin/users", map[string]any{
 		// camelCase: identity binds firstName / lastName as required, so
 		// snake_case keys bind to empty strings and fail validation.
-		"email":     in.Email,
-		"firstName": in.FirstName,
-		"lastName":  in.LastName,
-		"password":  in.Password,
+		"email":      in.Email,
+		"firstName":  in.FirstName,
+		"middleName": in.MiddleName,
+		"lastName":   in.LastName,
+		"password":   in.Password,
 	})
 	if err != nil {
 		return nil, false, err
