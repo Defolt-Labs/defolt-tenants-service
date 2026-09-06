@@ -127,6 +127,7 @@ func (h *Handlers) Create(c *gin.Context) {
 		case errors.Is(err, service.ErrSlugTaken):
 			response.Conflict(c, response.ErrTenantSlugTaken.Code, response.ErrTenantSlugTaken.Meta, nil)
 		default:
+			c.Error(err)
 			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		}
 		return
@@ -156,6 +157,7 @@ func (h *Handlers) GetBySlug(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -176,6 +178,7 @@ func (h *Handlers) Get(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -221,6 +224,7 @@ func (h *Handlers) Patch(c *gin.Context) {
 			response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -241,6 +245,7 @@ func (h *Handlers) Suspend(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -261,6 +266,7 @@ func (h *Handlers) Restore(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -285,6 +291,7 @@ func (h *Handlers) ReissueOwnerOTP(c *gin.Context) {
 		case errors.Is(err, service.ErrNoOwner):
 			response.Conflict(c, response.ErrTenantNoOwner.Code, response.ErrTenantNoOwner.Meta, nil)
 		default:
+			c.Error(err)
 			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		}
 		return
@@ -308,11 +315,10 @@ func (h *Handlers) ResendPaymentLink(c *gin.Context) {
 		case errors.Is(err, repository.ErrNotFound):
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 		case errors.Is(err, service.ErrBillingDown):
-			c.JSON(http.StatusServiceUnavailable, response.Envelope{
-				Code: response.ErrBillingUnavailable.Code,
-				Meta: response.ErrBillingUnavailable.Meta,
-			})
+			c.Error(err)
+			response.ServiceUnavailable(c, response.ErrBillingUnavailable.Code, response.ErrBillingUnavailable.Meta)
 		default:
+			c.Error(err)
 			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		}
 		return
@@ -343,11 +349,10 @@ func (h *Handlers) PendingCheckoutByEmail(c *gin.Context) {
 		case errors.Is(err, repository.ErrNotFound):
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 		case errors.Is(err, service.ErrBillingDown):
-			c.JSON(http.StatusServiceUnavailable, response.Envelope{
-				Code: response.ErrBillingUnavailable.Code,
-				Meta: response.ErrBillingUnavailable.Meta,
-			})
+			c.Error(err)
+			response.ServiceUnavailable(c, response.ErrBillingUnavailable.Code, response.ErrBillingUnavailable.Meta)
 		default:
+			c.Error(err)
 			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		}
 		return
@@ -374,6 +379,7 @@ func (h *Handlers) TenantHealth(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -454,6 +460,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		case errors.Is(err, service.ErrSlugTaken):
 			response.Conflict(c, response.ErrTenantSlugTaken.Code, response.ErrTenantSlugTaken.Meta, nil)
 		default:
+			c.Error(err)
 			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		}
 		return
@@ -487,6 +494,7 @@ func (h *Handlers) Activate(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -514,6 +522,7 @@ func (h *Handlers) SyncSubscriptionState(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 			return
 		}
+		c.Error(err)
 		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
 		return
 	}
@@ -583,7 +592,8 @@ func (h *Handlers) ResolveHost(c *gin.Context) {
 			c.Status(http.StatusOK)
 			return
 		}
-		c.Status(http.StatusServiceUnavailable)
+		c.Error(err)
+		response.Status(c, http.StatusServiceUnavailable, "DL_TENANT_RESOLVE_UNAVAILABLE")
 		return
 	}
 	switch t.Status {
