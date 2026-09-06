@@ -151,7 +151,17 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	//
 	// Every field is additive, so an existing consumer that decodes the old
 	// five is unaffected.
-	s.emit("tenant.created", map[string]any{
+	s.emit("tenant.created", tenantCreatedPayload(t))
+	return t, nil
+}
+
+// tenantCreatedPayload is the wire shape of tenant.created, split out from
+// the emit so it can be asserted in a test. A payload built inline inside a
+// method that needs a live NATS connection is a payload nothing checks, and
+// the whole reason this event is being changed is that nobody noticed for
+// months that it carried no name.
+func tenantCreatedPayload(t *model.Tenant) map[string]any {
+	return map[string]any{
 		"tenant_id":   t.ID,
 		"slug":        t.Slug,
 		"name":        t.Name,
@@ -162,8 +172,7 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 		"owner_first_name":  t.OwnerFirstName,
 		"owner_middle_name": t.OwnerMiddleName,
 		"owner_last_name":   t.OwnerLastName,
-	})
-	return t, nil
+	}
 }
 
 // ResolveBySlug is the hot-path lookup called by Traefik forward auth
