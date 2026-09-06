@@ -40,9 +40,18 @@ env:
   RESERVED_SLUGS: "www,api,app,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat,shop,staging,secrets,s3,registry,vps"
   DEFOLT_IDENTITY_URL: http://defolt-identity-service:8080
   DEFOLT_BILLING_URL: http://defolt-billing-service:8080
-  # Base domain tenant portal hosts hang off (multi-tenant DRS): tenant slugs
-  # resolve as <slug>.mt.drs.uat.defoltlabs.com.
-  TENANT_BASE_DOMAIN: mt.drs.uat.defoltlabs.com
+  # The DNS root every CUSTOMER-FACING host hangs off. Per-product host
+  # shapes are in service/product.go (ProductHome): a DRS store is
+  # <slug>.shop.<root>, a DHS clinic is dhs.<root>. This is only the root
+  # they share, so a new environment is one value and not a URL per
+  # product per service.
+  #
+  # It replaces TENANT_BASE_DOMAIN, which was set to
+  # `mt.drs.uat.defoltlabs.com` and read by no Go code in this repo at
+  # all. `mt.` is the legacy multi-tenant apex and must never reach
+  # anything a customer sees, so a dead value naming it was a loaded gun
+  # for whoever wired it up next.
+  PUBLIC_ROOT_DOMAIN: uat.defoltlabs.com
 
 envFile:
   enabled: true

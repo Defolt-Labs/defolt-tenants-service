@@ -95,6 +95,18 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		CountryCode:  in.CountryCode,
 		Product:      product,
 		Plan:         "standard",
+		// The owner's name goes in HERE, not after the call.
+		//
+		// It used to be assigned to the returned tenant thirty lines below,
+		// which is after Create has already emitted tenant.created. So the
+		// event went out with no name on it however carefully the signup
+		// form collected one, and defolt-billing, which welcomes the
+		// merchant off that event, had nothing to greet them by. Setting a
+		// field after the event that is supposed to announce it is a race
+		// nobody can win.
+		OwnerFirstName:  in.FirstName,
+		OwnerMiddleName: in.MiddleName,
+		OwnerLastName:   in.LastName,
 	})
 	if err != nil {
 		if errors.Is(err, ErrSlugTaken) {
@@ -122,11 +134,17 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	out := &SignupResult{Tenant: t}
 	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
 	out.OwnerEmail = t.OwnerEmail
-	// Keep the owner's legal name on the tenant. It rides on tenant.activated so
-	// the product can create its first staff record under the PERSON's name;
-	// without it dhs-setup fell back to the tenant's own Name, which made the
-	// facility admin of "Rani Dental Clinic" a staff member called after the
-	// clinic rather than after the dentist.
+	// The owner's legal name is already on `t`: Create set it, and it rode
+	// out on tenant.created. It rides on tenant.activated too, so the
+	// product consuming that event can create its first staff record under
+	// the PERSON's name; without it dhs-setup fell back to the tenant's own
+	// Name, which made the facility admin of "Rani Dental Clinic" a staff
+	// member called after the clinic rather than after the dentist.
+	//
+	// The one path that does NOT come through Create is a resumed signup:
+	// resumeStalledSignup returns the row from the abandoned attempt, and
+	// the retry may carry a corrected name. Re-apply for that case only,
+	// which is also harmless when Create just set the same values.
 	t.OwnerFirstName = strings.TrimSpace(in.FirstName)
 	t.OwnerMiddleName = strings.TrimSpace(in.MiddleName)
 	t.OwnerLastName = strings.TrimSpace(in.LastName)

@@ -334,7 +334,10 @@ func (h *Handlers) PendingCheckoutByEmail(c *gin.Context) {
 		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "email is required")
 		return
 	}
-	t, checkout, err := h.svc.PendingCheckoutByEmail(c.Request.Context(), email)
+	// `product` is optional and unscoped when absent, so drs-setup-service,
+	// which has always called this without one, is unaffected. dhs-setup
+	// sends `health`.
+	t, checkout, err := h.svc.PendingCheckoutByEmail(c.Request.Context(), email, c.Query("product"))
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):

@@ -39,14 +39,18 @@ type TenantsService struct {
 	identity *IdentityClient
 	billing  *BillingClient
 	reserved map[string]struct{}
+	// rootDomain is the DNS root customer-facing hosts hang off. Needed
+	// here because this service is what asks billing for a checkout, and
+	// therefore what decides where Selcom returns the payer.
+	rootDomain string
 }
 
-func New(repo *repository.Repo, nc *nats.Conn, c *cache.Cache, identity *IdentityClient, billing *BillingClient, reserved []string) *TenantsService {
+func New(repo *repository.Repo, nc *nats.Conn, c *cache.Cache, identity *IdentityClient, billing *BillingClient, reserved []string, rootDomain string) *TenantsService {
 	set := make(map[string]struct{}, len(reserved))
 	for _, r := range reserved {
 		set[strings.ToLower(strings.TrimSpace(r))] = struct{}{}
 	}
-	return &TenantsService{repo: repo, nc: nc, cache: c, identity: identity, billing: billing, reserved: set}
+	return &TenantsService{repo: repo, nc: nc, cache: c, identity: identity, billing: billing, reserved: set, rootDomain: rootDomain}
 }
 
 // CreateInput mirrors the POST /api/v1/tenants body. Product defaults
@@ -73,6 +77,17 @@ type CreateInput struct {
 	CountryCode string
 	Product     string
 	Plan        string
+	// The owner's legal name, in three parts. Optional at this layer
+	// because Create also serves the admin path, where a tenant is
+	// provisioned without a person attached; PublicSignup always supplies
+	// them and refuses without a first and last name.
+	//
+	// They are set BEFORE Insert, and therefore before the tenant.created
+	// emit below, which is the whole reason they are on CreateInput rather
+	// than assigned by the caller afterwards. See the emit.
+	OwnerFirstName  string
+	OwnerMiddleName string
+	OwnerLastName   string
 }
 
 func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Tenant, error) {
@@ -101,6 +116,10 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 		Product:      defaultStr(in.Product, "drs"),
 		Plan:         defaultStr(in.Plan, "standard"),
 		Status:       model.StatusPendingPayment,
+
+		OwnerFirstName:  strings.TrimSpace(in.OwnerFirstName),
+		OwnerMiddleName: strings.TrimSpace(in.OwnerMiddleName),
+		OwnerLastName:   strings.TrimSpace(in.OwnerLastName),
 	}
 	if err := s.repo.Insert(ctx, t); err != nil {
 		if errors.Is(err, repository.ErrSlugTaken) {
@@ -108,12 +127,41 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 		}
 		return nil, err
 	}
+	// tenant.created carries the NAMES, and it did not until now.
+	//
+	// WP-B10's addendum asserts that "the owner's three names have been on
+	// that event since defolt-tenants-service:51". That is true of
+	// tenant.activated, below, and it was never true of this one. This
+	// event carried five fields, none of which is a name: an id, a slug, an
+	// email, a product and a state.
+	//
+	// The cost of that was paid by a customer. defolt-billing consumes this
+	// event to open the registration invoice and to send the welcome email,
+	// had no name to put in it, and so passed the literal string "Your
+	// workspace" instead. The owner registered Rani Dental Clinic and was
+	// welcomed as "Your". A consumer cannot use a fact it was never sent,
+	// so the defect is as much here as it is in the template that printed
+	// it.
+	//
+	// `name` is the ORGANISATION's name and the owner_* fields are the
+	// PERSON's. Keeping them distinct on the wire is the same lesson
+	// tenant.activated learned the hard way, when dhs-setup fell back to
+	// the tenant's own name and made the facility admin of "Rani Dental
+	// Clinic" a staff member called after the clinic.
+	//
+	// Every field is additive, so an existing consumer that decodes the old
+	// five is unaffected.
 	s.emit("tenant.created", map[string]any{
 		"tenant_id":   t.ID,
 		"slug":        t.Slug,
+		"name":        t.Name,
 		"owner_email": t.ContactEmail,
 		"product":     t.Product,
 		"state":       string(t.Status),
+
+		"owner_first_name":  t.OwnerFirstName,
+		"owner_middle_name": t.OwnerMiddleName,
+		"owner_last_name":   t.OwnerLastName,
 	})
 	return t, nil
 }
@@ -396,7 +444,20 @@ func (s *TenantsService) ResendPaymentLink(ctx context.Context, id uuid.UUID) (*
 	if email == "" {
 		email = t.ContactEmail
 	}
-	res, err := s.billing.CreateCheckout(ctx, t.ID, email, "")
+	// Return the payer to the product they are buying.
+	//
+	// This argument was the empty string. billing passes redirect_url
+	// through to Selcom unchanged (defolt-billing-service/service/
+	// billing_service.go:464), and Selcom given no return URL leaves the
+	// payer sitting on its own confirmation page. So an owner who resumed
+	// an abandoned registration paid the 2,000 TZS and was never brought
+	// back to the product at all.
+	//
+	// The signup FORM has always sent one, which is why this stayed
+	// invisible: only the resume path was broken, and the resume path is
+	// where somebody lands precisely because the first attempt failed.
+	returnURL := ProductReturnURL(t.Product, t.Slug, s.rootDomain)
+	res, err := s.billing.CreateCheckout(ctx, t.ID, email, returnURL)
 	if err != nil {
 		logger.LogWarn("", "resend-payment-link", fmt.Sprintf("tenant=%s: %v", t.ID, err))
 		return nil, ErrBillingDown
@@ -411,8 +472,8 @@ func (s *TenantsService) ResendPaymentLink(ctx context.Context, id uuid.UUID) (*
 // generic "no store account" message. This lets sign-in hand back a
 // fresh payment link directly instead of sending them through the
 // signup form again.
-func (s *TenantsService) PendingCheckoutByEmail(ctx context.Context, email string) (*model.Tenant, *CheckoutResult, error) {
-	t, err := s.repo.FindPendingByContactEmail(ctx, email)
+func (s *TenantsService) PendingCheckoutByEmail(ctx context.Context, email, product string) (*model.Tenant, *CheckoutResult, error) {
+	t, err := s.repo.FindPendingByContactEmail(ctx, email, product)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -12,7 +12,15 @@ type Config struct {
 	ServiceName    string
 	ServiceVersion string
 	Environment    string
-	ServerPort     string
+	// PublicRootDomain is the DNS root every customer-facing host hangs
+	// off: `uat.defoltlabs.com` on cstaging, `defoltlabs.com` in
+	// production. Per-product host SHAPES live in service.ProductHome;
+	// this is only the root they share.
+	//
+	// It REPLACES TENANT_BASE_DOMAIN, which the chart set to
+	// `mt.drs.uat.defoltlabs.com` and which no Go code ever read.
+	PublicRootDomain string
+	ServerPort       string
 
 	DBHost, DBPort, DBName, DBUser, DBPassword, DBSSLMode string
 	MaxOpenConns, MaxIdleConns                            int
@@ -64,10 +72,11 @@ func Load() (*Config, error) {
 	}
 
 	c := &Config{
-		ServiceName:    getStr("SERVICE_NAME", "defolt-tenants-service"),
-		ServiceVersion: getStr("SERVICE_VERSION", "v0.1.0"),
-		Environment:    getStr("ENVIRONMENT", "development"),
-		ServerPort:     getStr("SERVER_PORT", "8080"),
+		ServiceName:      getStr("SERVICE_NAME", "defolt-tenants-service"),
+		ServiceVersion:   getStr("SERVICE_VERSION", "v0.1.0"),
+		Environment:      getStr("ENVIRONMENT", "development"),
+		PublicRootDomain: getStr("PUBLIC_ROOT_DOMAIN", "uat.defoltlabs.com"),
+		ServerPort:       getStr("SERVER_PORT", "8080"),
 
 		DBHost:     getStr("DB_HOST", "defolt-postgres"),
 		DBPort:     getStr("DB_PORT", "5432"),
