@@ -92,10 +92,20 @@ func (r *Repo) FindBySlug(ctx context.Context, product, slug string) (*model.Ten
 // path (drs-setup-service), which must never be usable to discover
 // whether an email owns an ACTIVE store — only whether there's an
 // unpaid registration to resume.
-func (r *Repo) FindPendingByContactEmail(ctx context.Context, email string) (*model.Tenant, error) {
+//
+// `product` scopes the answer to one vertical, and an empty product means
+// any. It has to be scopeable: one person can own an unpaid store AND an
+// unpaid clinic, the lookup was ordered newest-first across all products,
+// and so DHS sign-in would hand a dentist the checkout for his shop. The
+// two are different amounts against different invoices.
+func (r *Repo) FindPendingByContactEmail(ctx context.Context, email, product string) (*model.Tenant, error) {
 	var t model.Tenant
-	err := r.db.WithContext(ctx).
-		Where("LOWER(contact_email) = LOWER(?) AND status = ?", strings.TrimSpace(email), model.StatusPendingPayment).
+	q := r.db.WithContext(ctx).
+		Where("LOWER(contact_email) = LOWER(?) AND status = ?", strings.TrimSpace(email), model.StatusPendingPayment)
+	if p := strings.ToLower(strings.TrimSpace(product)); p != "" {
+		q = q.Where("product = ?", p)
+	}
+	err := q.
 		Order("created_at DESC").
 		First(&t).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

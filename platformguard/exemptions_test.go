@@ -43,6 +43,13 @@ var allowedIdentifiers = map[string]string{
 	"handler/product_host.go::productFromHost": "derives the product namespace " +
 		"(drs/health) from the request host/header so slug resolution is scoped — " +
 		"the namespace, not a retail product",
+	"service/product.go::ProductHome": "maps a product NAMESPACE (drs/health) to " +
+		"the customer-facing host shape it is served from — <slug>.shop.<root> for " +
+		"a store, dhs.<root> for a clinic. The namespace is exactly what varies, " +
+		"which is why the function takes it; it is not a retail product",
+	"service/product.go::ProductReturnURL": "where Selcom returns the payer, per " +
+		"product namespace, built on ProductHome above — the namespace, not a " +
+		"retail product",
 }
 
 // knownCoupling is the debt ledger: product vocabulary that is real,

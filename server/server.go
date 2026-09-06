@@ -59,7 +59,7 @@ func Initialize() (*App, error) {
 	ts := service.NewTurnstile(cfg.TurnstileSecret)
 	idClient := service.NewIdentityClient(cfg.IdentityURL, cfg.InternalServiceKey, cfg.DefaultPlatform)
 	billing := service.NewBillingClient(cfg.BillingURL, cfg.InternalServiceKey)
-	svc := service.New(repo, nc, rc, idClient, billing, cfg.ReservedSlugs)
+	svc := service.New(repo, nc, rc, idClient, billing, cfg.ReservedSlugs, cfg.PublicRootDomain)
 	h := handler.New(svc, ts, rc, cfg.ServiceVersion)
 
 	if cfg.Environment == "production" {
