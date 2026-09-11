@@ -92,7 +92,12 @@ func Load() (*Config, error) {
 		NatsURL: getStr("NATS_URL", "nats://defolt-nats:4222"),
 		// Falls back to the cluster-wide INTERNAL_SERVICE_KEY already in
 		// platform-env; billing and identity verify against that same value.
-		InternalServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
+		// INTERNAL_SERVICE_KEYS is WP-SEC4 H1's named set — "platform=<k>,dhs=<k>,drs=<k>"
+		// — so each namespace holds its own key and a compromised pod yields one of
+		// them instead of every internal route fleet-wide. It falls back to the single
+		// INTERNAL_SERVICE_KEY, which is still accepted, so the rollover is one
+		// namespace at a time rather than a flag day.
+		InternalServiceKey: getStr("INTERNAL_SERVICE_KEYS", getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", ""))),
 		AutoMigrate:        getBool("AUTO_MIGRATE", true),
 
 		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),

@@ -1,14 +1,18 @@
 package middleware
 
 import (
-	"crypto/subtle"
-
 	"defolt-tenants-service/reqid"
 	"defolt-tenants-service/response"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// CtxInternalCaller names the caller whose key authenticated the request, from
+// INTERNAL_SERVICE_KEYS. "legacy" when a single unnamed key is still in use.
+// A LABEL for logs and for the per-caller rotation this is a step towards —
+// never an authorisation input on its own.
+const CtxInternalCaller = "auth.internal_caller"
 
 const (
 	RequestIDHeader     = "X-Request-ID"
@@ -54,14 +58,19 @@ func GetRequestID(c *gin.Context) string {
 // to service-to-service callers only. Constant-time compare to keep
 // timing attacks off the table.
 func InternalServiceKey(sharedSecret string) gin.HandlerFunc {
-	want := []byte(sharedSecret)
+	// WP-SEC4 H1: sharedSecret may now be a NAMED SET
+	// ("platform=…,dhs=…,drs=…") so each namespace holds its own key and a
+	// compromised pod yields one of them rather than all of them. A single
+	// bare value still works — see internal_keyset.go.
+	keys := parseKeySet(sharedSecret)
 	return func(c *gin.Context) {
-		got := c.GetHeader(InternalKeyHeader)
-		if len(got) == 0 || subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+		caller, ok := keys.match(c.GetHeader(InternalKeyHeader))
+		if !ok {
 			response.Unauthorized(c, response.ErrForbidden.Code, response.ErrForbidden.Meta)
 			c.Abort()
 			return
 		}
+		c.Set(CtxInternalCaller, caller)
 		c.Next()
 	}
 }
