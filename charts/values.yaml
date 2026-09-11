@@ -80,6 +80,12 @@ ingress:
   # 2026-09-11 — which with the fleet's one shared internal key was a single
   # header away from 200. Needs chart >= 0.7.0 on the deploy host.
   excludeInternalPaths: true
+  # defolt.api has never carried HSTS, frameDeny, nosniff or a referrer policy,
+  # where dhs.api and drs.api have carried all four for months (measured
+  # 2026-09-11, against defolt-website's untouched Ingress too, so this predates
+  # the IngressRoute swap). Chart 0.8.0 attaches them. No CORS header is set —
+  # this service pins its own allow-list.
+  securityHeaders: true
   # tenants publishes /api/v1 UNSTRIPPED, so its internal routes sit at
   # /api/v1/internal/... with no service segment in front and the fleet regex
   # cannot match them. This adds the shape that does.
