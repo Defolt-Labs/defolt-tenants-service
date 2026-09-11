@@ -73,6 +73,18 @@ pdb:
 # are published here. Notably this leaves /internal/resolve-host unroutable
 # from outside, which server.go relies on: it is deliberately unauthenticated.
 ingress:
+  # WP-SEC4 H2. Renders a Traefik IngressRoute instead of a k8s Ingress so the
+  # routing rule can carry !PathRegexp(`^/[^/]+/api/v1/internal`), the exclusion
+  # DHS and DRS have always had. Without it this host answered 401 to an
+  # anonymous internet request for /api/v1/internal/... — measured on
+  # 2026-09-11 — which with the fleet's one shared internal key was a single
+  # header away from 200. Needs chart >= 0.7.0 on the deploy host.
+  excludeInternalPaths: true
+  # tenants publishes /api/v1 UNSTRIPPED, so its internal routes sit at
+  # /api/v1/internal/... with no service segment in front and the fleet regex
+  # cannot match them. This adds the shape that does.
+  extraExcludes:
+    - "^/api/v1/internal"
   host: defolt.api.uat.defoltlabs.com
   stripPrefix: false
   paths:
