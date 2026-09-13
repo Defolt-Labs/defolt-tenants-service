@@ -96,6 +96,26 @@ type createBody struct {
 	CountryCode string `json:"country_code"`
 	Product     string `json:"product"`
 	Plan        string `json:"plan"`
+
+	// The owner, optional and additive (WP-B16).
+	//
+	// This route is the door every signup that is not the marketing form
+	// comes through: the DHS onboarding tooling, support creating a tenant
+	// for a customer on the phone, and every proof script. It could not
+	// name the owner, so the tenant it created was ownerless — and since
+	// WP-B16 makes signup itself publish `tenant.activated`, an ownerless
+	// tenant is one whose product creates the facility and then logs
+	// "activated with no owner_user_id; admin mirror NOT created". A
+	// facility nobody can log into is not a provisioned facility.
+	//
+	// The caller registers the person in defolt-identity and passes the id
+	// back here, exactly as PublicSignup does. Absent leaves the columns
+	// null, which is what every existing caller already gets.
+	OwnerUserID     string `json:"owner_user_id"`
+	OwnerEmail      string `json:"owner_email"`
+	OwnerFirstName  string `json:"owner_first_name"`
+	OwnerMiddleName string `json:"owner_middle_name"`
+	OwnerLastName   string `json:"owner_last_name"`
 }
 
 func (h *Handlers) Create(c *gin.Context) {
@@ -107,7 +127,7 @@ func (h *Handlers) Create(c *gin.Context) {
 		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
 		return
 	}
-	t, err := h.svc.Create(c, service.CreateInput{
+	in := service.CreateInput{
 		Slug:         body.Slug,
 		Name:         body.Name,
 		ContactEmail: body.ContactEmail,
@@ -117,7 +137,24 @@ func (h *Handlers) Create(c *gin.Context) {
 		CountryCode:  body.CountryCode,
 		Product:      body.Product,
 		Plan:         body.Plan,
-	})
+
+		OwnerEmail:      body.OwnerEmail,
+		OwnerFirstName:  body.OwnerFirstName,
+		OwnerMiddleName: body.OwnerMiddleName,
+		OwnerLastName:   body.OwnerLastName,
+	}
+	// A malformed owner id is refused rather than dropped. Silently
+	// ignoring it would create the tenant, activate it, and leave the
+	// caller believing they had named an owner who does not exist.
+	if raw := strings.TrimSpace(body.OwnerUserID); raw != "" {
+		ownerID, perr := uuid.Parse(raw)
+		if perr != nil {
+			response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "owner_user_id must be a UUID")
+			return
+		}
+		in.OwnerUserID = &ownerID
+	}
+	t, err := h.svc.Create(c, in)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSlugInvalid), errors.Is(err, service.ErrValidation):
@@ -527,6 +564,24 @@ func (h *Handlers) SyncSubscriptionState(c *gin.Context) {
 		return
 	}
 	response.OK(c, response.OKTenantUpdated.Code, response.OKTenantUpdated.Meta, t)
+}
+
+// ---------- POST /api/v1/internal/sweep-exploring (WP-B16) ----------
+// Runs the activation sweep on demand. The same pass the boot + hourly
+// ticker runs, exposed so a proof can force it rather than wait an hour,
+// and so support can unstick one tenant without a deploy.
+//
+// Reports `activated`: tenants that actually changed state and had
+// tenant.activated published for them. Zero is the normal steady-state
+// answer and is not an error.
+func (h *Handlers) SweepExploring(c *gin.Context) {
+	n, err := h.svc.SweepExploringPending(c.Request.Context())
+	if err != nil {
+		c.Error(err)
+		response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
+		return
+	}
+	response.OK(c, response.OKTenantUpdated.Code, response.OKTenantUpdated.Meta, gin.H{"activated": n})
 }
 
 // ---------- POST /internal/resolve-host (Traefik forward auth) ----------

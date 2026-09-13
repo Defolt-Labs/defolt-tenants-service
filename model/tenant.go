@@ -99,6 +99,21 @@ type Tenant struct {
 	OwnerMiddleName string `gorm:"size:80" json:"owner_middle_name,omitempty"`
 	OwnerLastName   string `gorm:"size:80" json:"owner_last_name,omitempty"`
 
+	// ActivatedAt is the moment this tenant became usable — the moment
+	// `tenant.activated` went out and its product provisioned it.
+	//
+	// It is not the same fact as `status = active`, which is a CURRENT
+	// state that a suspension and a restore both rewrite. WP-B16 needs
+	// the moment, not the state: the sweep that activates an exploring
+	// tenant must be able to say, idempotently, whether this tenant has
+	// ever been announced to its product, and a tenant that was
+	// activated, suspended for non-payment and restored must not be
+	// announced a second time.
+	//
+	// Nullable, and null for every row created before the column: that
+	// is honest rather than convenient. Nothing derives access from it.
+	ActivatedAt *time.Time `json:"activated_at,omitempty"`
+
 	// TrialStartsAt / TrialEndsAt bracket the 7-day free window that
 	// unlocks on registration-payment confirmation. Filled in by the
 	// billing consumer's `tenant.activated` handler.

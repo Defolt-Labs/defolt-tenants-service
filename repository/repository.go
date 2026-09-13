@@ -156,6 +156,28 @@ func (r *Repo) ListPendingCleanup(ctx context.Context, olderThanHours int) ([]mo
 	return out, err
 }
 
+// ListPending returns tenants currently in `pending_payment`, oldest
+// first, bounded by limit. Backs WP-B16's activation sweep.
+//
+// Deliberately NOT age-filtered, unlike ListPendingCleanup. The cleanup
+// sweep waits 24 hours because it deletes; this one activates, and a
+// facility whose owner is sitting in front of the signup confirmation
+// right now is exactly the row it most needs to find. Oldest first so the
+// tenants stranded by WP-B15 are cleared before today's signups, which
+// only matters when the limit bites.
+func (r *Repo) ListPending(ctx context.Context, limit int) ([]model.Tenant, error) {
+	var out []model.Tenant
+	if limit <= 0 {
+		limit = 100
+	}
+	err := r.db.WithContext(ctx).
+		Where("status = ?", model.StatusPendingPayment).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
+}
+
 // CountOtherTenantsOwnedBy reports how many OTHER tenants the given identity
 // user owns, excluding the one being swept. The sweeper uses this to decide
 // whether deleting that identity account is safe.

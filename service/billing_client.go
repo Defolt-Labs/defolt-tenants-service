@@ -5,6 +5,7 @@ import (
 	"context"
 	"defolt-tenants-service/reqid"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,4 +99,66 @@ func (c *BillingClient) CreateCheckout(ctx context.Context, tenantID uuid.UUID, 
 		return nil, fmt.Errorf("billing CreateCheckout: envelope missing payment_url")
 	}
 	return &env.Data, nil
+}
+
+// ErrNoSubscription means billing has no subscription row for this
+// tenant. Distinct from a transport failure on purpose: the WP-B16
+// activation sweep must do NOTHING when billing has never heard of a
+// tenant, and must retry on the next tick when billing is merely
+// unreachable. Collapsing the two would either activate a tenant no
+// product is entitled to, or leave a live one stuck for ever.
+var ErrNoSubscription = errors.New("billing has no subscription for this tenant")
+
+// SubscriptionState reads the tenant's billing lifecycle state off the
+// entitlement endpoint — the same read the products gate on, so there is
+// one authority and not a second copy of the enum here.
+//
+// This is the PULL half of WP-B16. Billing pushes the state the moment it
+// seeds a subscription (defolt-billing-service calls
+// PUT /internal/tenants/:id/subscription-state), and that push is a single
+// best-effort HTTP call that a restart, a rollout or a network blip can
+// lose. A tenant that misses it is not merely mis-labelled: under WP-B15
+// nothing ever pays at signup, so the tenant stays `pending_payment`, no
+// `tenant.activated` is emitted, its product never provisions it, and the
+// abandonment sweep would eventually delete it. The pull is what makes the
+// push losable.
+func (c *BillingClient) SubscriptionState(ctx context.Context, tenantID uuid.UUID) (string, error) {
+	if c == nil || c.baseURL == "" {
+		return "", fmt.Errorf("billing-client: baseURL not configured")
+	}
+	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/entitlement", c.baseURL, tenantID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	if c.internalKey != "" {
+		req.Header.Set("X-Internal-Service-Key", c.internalKey)
+	}
+	if rid := reqid.From(ctx); rid != "" {
+		req.Header.Set("X-Request-ID", rid)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return "", ErrNoSubscription
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("billing SubscriptionState: %d %s", resp.StatusCode, string(raw))
+	}
+	var env struct {
+		Data struct {
+			State string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return "", fmt.Errorf("billing SubscriptionState: bad envelope: %w", err)
+	}
+	if env.Data.State == "" {
+		return "", fmt.Errorf("billing SubscriptionState: envelope missing state")
+	}
+	return env.Data.State, nil
 }

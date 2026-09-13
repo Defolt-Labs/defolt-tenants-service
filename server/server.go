@@ -22,6 +22,16 @@ import (
 const (
 	sweepFirstDelay = 1 * time.Minute
 	sweepInterval   = 15 * time.Minute
+
+	// WP-B16. The activation sweep runs BEFORE the abandonment sweep's
+	// first pass, and that ordering is load bearing rather than tidy: the
+	// two look at the same rows and one of them deletes. Activating first
+	// means a tenant stranded by WP-B15 is provisioned rather than
+	// examined for reaping. (The abandonment sweeper refuses to delete a
+	// live tenant on its own too — see abandonBlocked — so this is the
+	// second of two independent guards, not the only one.)
+	exploreSweepFirstDelay = 20 * time.Second
+	exploreSweepInterval   = 1 * time.Hour
 )
 
 type App struct {
@@ -94,6 +104,7 @@ func Initialize() (*App, error) {
 		internal.GET("/tenants/:id/health", h.TenantHealth)
 		internal.POST("/internal/tenants/:id/activate", h.Activate)
 		internal.PUT("/internal/tenants/:id/subscription-state", h.SyncSubscriptionState)
+		internal.POST("/internal/sweep-exploring", h.SweepExploring)
 	}
 
 	// Traefik forward-auth entry point. Public because Traefik is the
@@ -105,6 +116,7 @@ func Initialize() (*App, error) {
 
 	app := &App{Config: cfg, Engine: engine, DB: db, NC: nc, Cache: rc}
 	app.startSweeper(svc)
+	app.startExploreActivator(svc)
 	return app, nil
 }
 
@@ -137,6 +149,54 @@ func (a *App) startSweeper(svc *service.TenantsService) {
 		run()
 
 		ticker := time.NewTicker(sweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
+		}
+	}()
+}
+
+// startExploreActivator runs WP-B16's activation sweep: 20 seconds after
+// boot, then hourly. The boot pass is what provisions the tenants WP-B15
+// stranded, so the deploy of this change is itself the data fix and there
+// is no migration to run by hand.
+func (a *App) startExploreActivator(svc *service.TenantsService) {
+	ctx, cancel := context.WithCancel(context.Background())
+	prev := a.stopSweeper
+	a.stopSweeper = func() {
+		if prev != nil {
+			prev()
+		}
+		cancel()
+	}
+
+	run := func() {
+		n, err := svc.SweepExploringPending(ctx)
+		if err != nil {
+			logger.LogWarn("", "sweep-exploring", "sweep failed: "+err.Error())
+			return
+		}
+		if n > 0 {
+			logger.LogInfo("sweep-exploring", fmt.Sprintf("activated %d exploring tenant(s); their products provision on tenant.activated", n))
+		}
+	}
+
+	go func() {
+		first := time.NewTimer(exploreSweepFirstDelay)
+		defer first.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-first.C:
+		}
+		run()
+
+		ticker := time.NewTicker(exploreSweepInterval)
 		defer ticker.Stop()
 		for {
 			select {
