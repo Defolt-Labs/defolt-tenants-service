@@ -32,6 +32,11 @@ var (
 // with alnum, dashes allowed internally.
 var slugRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}[a-z0-9]$`)
 
+// pendingSweepLimit bounds one pass of the WP-B16 activation sweep. Each row
+// costs one HTTP call to billing, and the sweep runs again in an hour, so a
+// bounded pass that finishes beats an unbounded one that stalls the ticker.
+const pendingSweepLimit = 500
+
 type TenantsService struct {
 	repo     *repository.Repo
 	nc       *nats.Conn
@@ -77,6 +82,13 @@ type CreateInput struct {
 	CountryCode string
 	Product     string
 	Plan        string
+	// The owner, as the caller has already registered them in
+	// defolt-identity. Optional: the marketing signup form fills these in
+	// after Create returns (it registers the owner concurrently with the
+	// checkout call), and the internal route fills them in here because it
+	// has nowhere else to. WP-B16.
+	OwnerUserID *uuid.UUID
+	OwnerEmail  string
 	// The owner's legal name, in three parts. Optional at this layer
 	// because Create also serves the admin path, where a tenant is
 	// provisioned without a person attached; PublicSignup always supplies
@@ -117,6 +129,8 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 		Plan:         defaultStr(in.Plan, "standard"),
 		Status:       model.StatusPendingPayment,
 
+		OwnerUserID:     in.OwnerUserID,
+		OwnerEmail:      strings.TrimSpace(in.OwnerEmail),
 		OwnerFirstName:  strings.TrimSpace(in.OwnerFirstName),
 		OwnerMiddleName: strings.TrimSpace(in.OwnerMiddleName),
 		OwnerLastName:   strings.TrimSpace(in.OwnerLastName),
@@ -322,6 +336,9 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	t.Status = model.StatusActive
 	t.TrialStartsAt = &now
 	t.TrialEndsAt = &trialEnd
+	if t.ActivatedAt == nil {
+		t.ActivatedAt = &now
+	}
 	if err := s.repo.Save(ctx, t); err != nil {
 		return nil, err
 	}
@@ -331,12 +348,39 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	// OwnerUserID/OwnerEmail on the tenant; without them here nothing
 	// downstream could tie the activated tenant to its Store Admin — the
 	// onboarding "sealed room" this closes.
-	s.emit("tenant.activated", map[string]any{
+	s.emit("tenant.activated", activatedPayload(t))
+	return t, nil
+}
+
+// activatedPayload is the wire shape of tenant.activated, split out of the
+// two places that used to build it inline. They had DRIFTED: the payment
+// path carried the trial window and the billing-sync path did not, and WP-B16
+// adds a third publisher (the exploring activation), which is two chances too
+// many to emit a subtly different event for the same fact.
+//
+// Every consumer of this event — dhs-setup and drs-setup — provisions the
+// product's first-run state from it, and both refuse to create the owner's
+// staff mirror without `owner_user_id` and address it by `owner_email`. So
+// the two fields that decide whether an owner can log in at all are built
+// here, once, with the fallback that matters:
+//
+// `owner_email` falls back to the tenant's contact email. OwnerEmail is set
+// by the public signup form and by nothing else — a tenant created through
+// the internal POST /tenants route (which is how support, the DHS onboarding
+// tooling and every proof script create one) has only ContactEmail, so the
+// event went out with an empty owner email and dhs-setup wrote a staff row
+// with an empty address that no login can ever match.
+func activatedPayload(t *model.Tenant) map[string]any {
+	ownerEmail := strings.TrimSpace(t.OwnerEmail)
+	if ownerEmail == "" {
+		ownerEmail = strings.TrimSpace(t.ContactEmail)
+	}
+	p := map[string]any{
 		"tenant_id":     t.ID,
 		"slug":          t.Slug,
 		"name":          t.Name,
 		"owner_user_id": t.OwnerUserID,
-		"owner_email":   t.OwnerEmail,
+		"owner_email":   ownerEmail,
 		// The PERSON's name, so the consuming product can create its first staff
 		// record under it. `name` above is the FACILITY's name; dhs-setup used to
 		// fall back to that and made the facility admin a staff member called
@@ -344,10 +388,107 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 		"owner_first_name":  t.OwnerFirstName,
 		"owner_middle_name": t.OwnerMiddleName,
 		"owner_last_name":   t.OwnerLastName,
-		"trial_starts_at":   now,
-		"trial_ends_at":     trialEnd,
-	})
-	return t, nil
+		// Which product must provision this tenant. Additive; both consumers
+		// are bound to their own subject today and ignore it.
+		"product": t.Product,
+	}
+	if t.ActivatedAt != nil {
+		p["activated_at"] = *t.ActivatedAt
+	}
+	// Present only when there IS a trial. An exploring tenant has no trial
+	// window — WP-B15 starts that clock at first real use — and sending a
+	// zero time would read as one that had already expired.
+	if t.TrialStartsAt != nil {
+		p["trial_starts_at"] = *t.TrialStartsAt
+	}
+	if t.TrialEndsAt != nil {
+		p["trial_ends_at"] = *t.TrialEndsAt
+	}
+	return p
+}
+
+// ActivateExploring is WP-B16's entry point: a tenant whose billing
+// subscription is `exploring` is a LIVE tenant and must exist inside its
+// product.
+//
+// WP-B15 stopped raising the registration fee at signup, which was the
+// right call and had a consequence nobody traced: payment was the ONLY
+// thing that ever moved a tenant out of `pending_payment`, and
+// `tenant.activated` is the ONLY thing that makes dhs-setup or drs-setup
+// provision one. So from WP-B15 onward every self-signed-up facility was
+// created and then never came to exist in the product it had signed up
+// for — no facility row, no staff row, and therefore no login, because
+// login resolves memberships from staff rows. The owner met this himself
+// on 2026-09-13 with `defolt-labs`.
+//
+// Idempotent by the same structural guard ActivateAfterRegistration uses:
+// only a `pending_payment` tenant is moved, so a redelivered push, the
+// hourly sweep and a hand-run sweep all settle to one activation and one
+// event. That matters because the event's consumers are the thing that
+// creates a facility, and a second facility for one tenant is not a
+// duplicate row the database would refuse — it is a second clinic.
+func (s *TenantsService) ActivateExploring(ctx context.Context, id uuid.UUID) (*model.Tenant, bool, error) {
+	t, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if t.Status != model.StatusPendingPayment {
+		return t, false, nil
+	}
+	now := time.Now()
+	t.Status = model.StatusActive
+	if t.ActivatedAt == nil {
+		t.ActivatedAt = &now
+	}
+	// No trial window is set here, deliberately. An exploring tenant owes
+	// nothing and is not on a clock; WP-B15's first-use signal is what
+	// raises the fee and starts the trial, and writing a trial here would
+	// hand the merchant a second, earlier deadline that nothing enforces.
+	if err := s.repo.Save(ctx, t); err != nil {
+		return nil, false, err
+	}
+	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
+	s.emit("tenant.activated", activatedPayload(t))
+	logger.LogInfo("activate-exploring", fmt.Sprintf("tenant=%s slug=%s product=%s is exploring and is now active; tenant.activated published", t.ID, t.Slug, t.Product))
+	return t, true, nil
+}
+
+// TenantStatusForSubscriptionState maps billing's lifecycle enum onto this
+// service's SPA-gate status. Pure, and split out of SyncSubscriptionState so
+// the mapping can be asserted without a database: the whole of WP-B16 turns
+// on one row of it, and the defect it fixes was invisible precisely because
+// nothing ever read the table out loud.
+//
+// The two enums stay deliberately unreconciled elsewhere (see ResolveHost).
+// This is the ONE place either is translated into the other.
+func TenantStatusForSubscriptionState(subState string) model.TenantStatus {
+	switch subState {
+	case "awaiting_registration":
+		return model.StatusPendingPayment
+	case "exploring":
+		// WP-B16. `exploring` is WP-B15's entry state: no invoice, no due
+		// date, full access. It is therefore an ACTIVE tenant, and it has to
+		// be, because the caller emits tenant.activated on the
+		// pending_payment → active edge and that event is the only thing
+		// that makes dhs-setup or drs-setup provision the tenant at all.
+		//
+		// It fell through to `default` before this line, which maps an
+		// unknown billing state to `suspended`. That default is the right
+		// instinct for a state this service has genuinely never heard of,
+		// and it was exactly wrong for this one: billing's own seed would
+		// have suspended every new tenant in the fleet the moment it pushed
+		// the state it had just written.
+		return model.StatusActive
+	case "trial", "active":
+		return model.StatusActive
+	case "grace":
+		return model.StatusGrace
+	case "suspended", "cancelled":
+		return model.StatusSuspended
+	default:
+		// Unknown states from billing should safely lock the gate.
+		return model.StatusSuspended
+	}
 }
 
 // SyncSubscriptionState is called by defolt-billing-service whenever a
@@ -358,25 +499,16 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	var newStatus model.TenantStatus
-	switch subState {
-	case "awaiting_registration":
-		newStatus = model.StatusPendingPayment
-	case "trial", "active":
-		newStatus = model.StatusActive
-	case "grace":
-		newStatus = model.StatusGrace
-	case "suspended", "cancelled":
-		newStatus = model.StatusSuspended
-	default:
-		// Unknown states from billing should safely lock the gate
-		newStatus = model.StatusSuspended
-	}
+	newStatus := TenantStatusForSubscriptionState(subState)
 	oldStatus := t.Status
 	if oldStatus == newStatus {
 		return t, nil // no change
 	}
 	t.Status = newStatus
+	if newStatus == model.StatusActive && t.ActivatedAt == nil {
+		now := time.Now()
+		t.ActivatedAt = &now
+	}
 	if err := s.repo.Save(ctx, t); err != nil {
 		return nil, err
 	}
@@ -389,17 +521,7 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 	})
 
 	if oldStatus == model.StatusPendingPayment && newStatus == model.StatusActive {
-		s.emit("tenant.activated", map[string]any{
-			"tenant_id":     t.ID,
-			"slug":          t.Slug,
-			"name":          t.Name,
-			"owner_user_id": t.OwnerUserID,
-			"owner_email":   t.OwnerEmail,
-			// See the activate path: the person's name, not the facility's.
-			"owner_first_name":  t.OwnerFirstName,
-			"owner_middle_name": t.OwnerMiddleName,
-			"owner_last_name":   t.OwnerLastName,
-		})
+		s.emit("tenant.activated", activatedPayload(t))
 	}
 
 	return t, nil
@@ -513,6 +635,26 @@ func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, t := range rows {
+		// WP-B16: never reap a tenant that is merely EXPLORING.
+		//
+		// This sweeper hard-deletes the tenant row AND the owner's identity
+		// account. It was safe while `pending_payment` meant "started a
+		// registration payment and walked away", because 24 hours of silence
+		// after a checkout really is an abandoned signup. WP-B15 changed what
+		// the state means without changing this: nobody pays at signup any
+		// more, so from that release every live, happily-exploring facility
+		// became eligible for deletion on its second day.
+		//
+		// The activation sweep below moves an exploring tenant to `active`
+		// within the hour, so in practice these two never race. "In practice"
+		// is not a guarantee — the activation sweep depends on billing being
+		// reachable, and so a billing outage would have turned into deleted
+		// customers. Ask billing here too, and treat every answer that is not
+		// a definite "no subscription" as a reason to leave the row alone.
+		if keep, why := s.abandonBlocked(ctx, t.ID); keep {
+			logger.LogInfo("sweep-abandoned", fmt.Sprintf("tenant=%s left alone: %s", t.ID, why))
+			continue
+		}
 		// Identity user first, tenant row second. The tenant row is the
 		// ONLY record of which identity user belongs to this signup, so
 		// dropping it before the owner is deleted strands that account
@@ -554,6 +696,78 @@ func (s *TenantsService) SweepAbandoned(ctx context.Context) (int, error) {
 			"slug":      t.Slug,
 		})
 		n++
+	}
+	return n, nil
+}
+
+// abandonBlocked answers whether the abandonment sweeper must leave this
+// tenant alone, and why. The bias is deliberate and one-directional: a
+// deletion is irreversible and takes the owner's identity account with it,
+// so anything other than a definite "billing has no subscription for this
+// tenant" blocks it.
+//
+// `awaiting_registration` is the one live state that does NOT block: it is
+// the state of a product that still charges at signup, which is the case
+// this sweeper was written for and the only one it is still right about.
+func (s *TenantsService) abandonBlocked(ctx context.Context, id uuid.UUID) (bool, string) {
+	if s.billing == nil {
+		return false, ""
+	}
+	state, err := s.billing.SubscriptionState(ctx, id)
+	switch {
+	case errors.Is(err, ErrNoSubscription):
+		return false, ""
+	case err != nil:
+		return true, fmt.Sprintf("billing could not be asked for its subscription state (%v); a tenant is never deleted on an unanswered question", err)
+	case state == "awaiting_registration":
+		return false, ""
+	default:
+		return true, fmt.Sprintf("billing holds its subscription as %q, which is a live tenant", state)
+	}
+}
+
+// SweepExploringPending activates every tenant that is still
+// `pending_payment` while billing holds its subscription as `exploring`.
+//
+// This is the self-healing half of WP-B16 and the reason the round needs no
+// data migration: the tenants stranded by WP-B15 are found and provisioned by
+// the deploy itself, one minute after boot, and any later push that is lost
+// is picked up within the hour.
+//
+// Returns how many tenants it actually activated — activations, not rows
+// examined — so a log line that says "1" means one facility came into
+// existence and a caller can assert on it.
+func (s *TenantsService) SweepExploringPending(ctx context.Context) (int, error) {
+	// Mints its own trace id for the same reason SweepAbandoned does: a
+	// ticker is the origin of its own trace, and the internal calls this
+	// makes are refused without one.
+	ctx = reqid.With(ctx, "explore-"+uuid.NewString()[:8])
+
+	if s.billing == nil {
+		return 0, nil
+	}
+	rows, err := s.repo.ListPending(ctx, pendingSweepLimit)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range rows {
+		t := rows[i]
+		state, err := s.billing.SubscriptionState(ctx, t.ID)
+		if err != nil {
+			if !errors.Is(err, ErrNoSubscription) {
+				logger.LogWarn("", "sweep-exploring", fmt.Sprintf("tenant=%s: %v", t.ID, err))
+			}
+			continue
+		}
+		if state != "exploring" {
+			continue
+		}
+		if _, activated, err := s.ActivateExploring(ctx, t.ID); err != nil {
+			logger.LogWarn("", "sweep-exploring", fmt.Sprintf("tenant=%s activation failed, retrying next tick: %v", t.ID, err))
+		} else if activated {
+			n++
+		}
 	}
 	return n, nil
 }
