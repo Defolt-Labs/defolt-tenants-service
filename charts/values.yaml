@@ -10,6 +10,16 @@ image:
 port: 8080
 
 env:
+  # SERVICE_VERSION is what GET /health answers with, and it is the only
+  # honest way to tell "the fix is deployed" from "the tag changed" — a
+  # rolled-back or half-rolled deployment carries a new image tag and the
+  # old binary. The chart had never set it, so every environment reported
+  # config.go's default of v0.1.0 and the field said nothing at all.
+  #
+  # v0.2.0: the internal POST /tenants route carries owner_user_id onto the
+  # tenant, refuses a health tenant that names no owner, and tenant.activated
+  # carries the inbound request id.
+  SERVICE_VERSION: "v0.2.0"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"
