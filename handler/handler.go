@@ -118,15 +118,17 @@ type createBody struct {
 	OwnerLastName   string `json:"owner_last_name"`
 }
 
-func (h *Handlers) Create(c *gin.Context) {
-	if h.replayIdempotent(c) {
-		return
-	}
-	var body createBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
-		return
-	}
+// createInputFrom is the ONE place a createBody becomes a service.CreateInput.
+//
+// It is split out of the handler so it can be asserted without a database, and
+// it is a single function on purpose. The defect this round fixes was exactly a
+// field that existed on the request struct, existed on the tenant model, and
+// was dropped by the mapping in between; a second copy of this mapping is a
+// second chance for the next field added to go the same way. A field added to
+// createBody is carried HERE, or it is carried nowhere.
+//
+// The returned error is already a caller-readable reason, not a sentinel.
+func createInputFrom(body createBody) (service.CreateInput, error) {
 	in := service.CreateInput{
 		Slug:         body.Slug,
 		Name:         body.Name,
@@ -149,10 +151,41 @@ func (h *Handlers) Create(c *gin.Context) {
 	if raw := strings.TrimSpace(body.OwnerUserID); raw != "" {
 		ownerID, perr := uuid.Parse(raw)
 		if perr != nil {
-			response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, "owner_user_id must be a UUID")
-			return
+			return in, errors.New("owner_user_id must be a UUID")
 		}
 		in.OwnerUserID = &ownerID
+	}
+	return in, nil
+}
+
+func (h *Handlers) Create(c *gin.Context) {
+	if h.replayIdempotent(c) {
+		return
+	}
+	var body createBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
+		return
+	}
+	in, err := createInputFrom(body)
+	if err != nil {
+		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
+		return
+	}
+	// A health tenant with no owner is refused HERE rather than created.
+	//
+	// dhs-setup will not create the owner's staff mirror without
+	// owner_user_id, so the tenant would be born, activated, and the clinic
+	// would exist with nobody able to sign into it — which is what happened
+	// to a live clinic on 2026-09-16. The refusal names both halves: the
+	// product that demands an owner, and the request that named none.
+	//
+	// Only this route. PublicSignup registers the owner in identity AFTER
+	// Create returns, so the guard is not in the service, and a non-health
+	// tenant keeps the behaviour it has always had.
+	if err := service.RequireOwnerForProduct(in.Product, in.OwnerUserID); err != nil {
+		response.BadRequest(c, response.ErrTenantOwnerRequired.Code, response.ErrTenantOwnerRequired.Meta, err.Error())
+		return
 	}
 	t, err := h.svc.Create(c, in)
 	if err != nil {

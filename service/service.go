@@ -26,7 +26,37 @@ var (
 	ErrValidation   = errors.New("validation failed")
 	ErrNoOwner      = errors.New("tenant has no resolvable owner user")
 	ErrBillingDown  = errors.New("billing service unavailable")
+	// ErrOwnerRequired refuses a HEALTH tenant that names no owner.
+	// See RequireOwnerForProduct for why it is not enforced inside Create.
+	ErrOwnerRequired = errors.New("the health product requires an owner on every tenant, and owner_user_id was not given")
 )
+
+// RequireOwnerForProduct refuses a health tenant created with no owner.
+//
+// WHY it exists: `tenant.activated` is the only thing that makes a product
+// provision a tenant, and dhs-setup refuses to create the owner's staff
+// mirror without `owner_user_id` — it logs "activated with no owner_user_id;
+// admin mirror NOT created" and carries on. So an ownerless health tenant is
+// a clinic that exists, looks provisioned, and that nobody can sign into.
+//
+// WHY it is NOT inside Create: PublicSignup calls Create BEFORE it registers
+// the owner in defolt-identity — it runs identity and billing concurrently and
+// assigns OwnerUserID afterwards — so a guard inside Create would refuse every
+// health signup the marketing form has ever made. The internal POST /tenants
+// route is the one door whose caller already holds the identity id and has
+// nowhere else to put it, so that is the door this guards.
+//
+// A non-health product is untouched: a `drs` tenant has always been creatable
+// without an owner and this round does not tighten that.
+func RequireOwnerForProduct(product string, owner *uuid.UUID) error {
+	if NormalizeProduct(product) != "health" {
+		return nil
+	}
+	if owner == nil || *owner == uuid.Nil {
+		return ErrOwnerRequired
+	}
+	return nil
+}
 
 // slugRegex mirrors plan §4.9: 3-32 chars, starts with a letter, ends
 // with alnum, dashes allowed internally.
@@ -117,24 +147,7 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	if err != nil {
 		return nil, err
 	}
-	t := &model.Tenant{
-		Slug:         slug,
-		Name:         strings.TrimSpace(in.Name),
-		ContactEmail: strings.TrimSpace(in.ContactEmail),
-		Phone:        phone,
-		Currency:     defaultStr(in.Currency, "TZS"),
-		Timezone:     defaultStr(in.Timezone, "Africa/Dar_es_Salaam"),
-		CountryCode:  defaultStr(in.CountryCode, "TZ"),
-		Product:      defaultStr(in.Product, "drs"),
-		Plan:         defaultStr(in.Plan, "standard"),
-		Status:       model.StatusPendingPayment,
-
-		OwnerUserID:     in.OwnerUserID,
-		OwnerEmail:      strings.TrimSpace(in.OwnerEmail),
-		OwnerFirstName:  strings.TrimSpace(in.OwnerFirstName),
-		OwnerMiddleName: strings.TrimSpace(in.OwnerMiddleName),
-		OwnerLastName:   strings.TrimSpace(in.OwnerLastName),
-	}
+	t := newTenantFromCreate(in, slug, phone)
 	if err := s.repo.Insert(ctx, t); err != nil {
 		if errors.Is(err, repository.ErrSlugTaken) {
 			return nil, ErrSlugTaken
@@ -167,6 +180,39 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	// five is unaffected.
 	s.emit("tenant.created", tenantCreatedPayload(t))
 	return t, nil
+}
+
+// newTenantFromCreate is the ONE place a CreateInput becomes a tenant row.
+//
+// Split out of Create so the mapping can be asserted without a database, which
+// is the whole lesson of the defect it closes: `owner_user_id` was on the
+// request struct and on the model, and the assignment between them was simply
+// missing. A struct literal inside a method that needs Postgres to run is a
+// mapping no test ever reads, and a missed field in one is invisible — the
+// tenant is created, activated, and its product logs "admin mirror NOT
+// created" while every status code on the way says 201.
+//
+// slug and phone are passed in already normalised: Create validates them and
+// they are the two fields whose accepted form differs from what was sent.
+func newTenantFromCreate(in CreateInput, slug, phone string) *model.Tenant {
+	return &model.Tenant{
+		Slug:         slug,
+		Name:         strings.TrimSpace(in.Name),
+		ContactEmail: strings.TrimSpace(in.ContactEmail),
+		Phone:        phone,
+		Currency:     defaultStr(in.Currency, "TZS"),
+		Timezone:     defaultStr(in.Timezone, "Africa/Dar_es_Salaam"),
+		CountryCode:  defaultStr(in.CountryCode, "TZ"),
+		Product:      defaultStr(in.Product, "drs"),
+		Plan:         defaultStr(in.Plan, "standard"),
+		Status:       model.StatusPendingPayment,
+
+		OwnerUserID:     in.OwnerUserID,
+		OwnerEmail:      strings.TrimSpace(in.OwnerEmail),
+		OwnerFirstName:  strings.TrimSpace(in.OwnerFirstName),
+		OwnerMiddleName: strings.TrimSpace(in.OwnerMiddleName),
+		OwnerLastName:   strings.TrimSpace(in.OwnerLastName),
+	}
 }
 
 // tenantCreatedPayload is the wire shape of tenant.created, split out from
@@ -348,7 +394,7 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	// OwnerUserID/OwnerEmail on the tenant; without them here nothing
 	// downstream could tie the activated tenant to its Store Admin — the
 	// onboarding "sealed room" this closes.
-	s.emit("tenant.activated", activatedPayload(t))
+	s.emit("tenant.activated", activatedPayload(ctx, t))
 	return t, nil
 }
 
@@ -370,7 +416,7 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 // tooling and every proof script create one) has only ContactEmail, so the
 // event went out with an empty owner email and dhs-setup wrote a staff row
 // with an empty address that no login can ever match.
-func activatedPayload(t *model.Tenant) map[string]any {
+func activatedPayload(ctx context.Context, t *model.Tenant) map[string]any {
 	ownerEmail := strings.TrimSpace(t.OwnerEmail)
 	if ownerEmail == "" {
 		ownerEmail = strings.TrimSpace(t.ContactEmail)
@@ -391,6 +437,19 @@ func activatedPayload(t *model.Tenant) map[string]any {
 		// Which product must provision this tenant. Additive; both consumers
 		// are bound to their own subject today and ignore it.
 		"product": t.Product,
+		// The request id that caused this activation, lifted off the inbound
+		// HTTP context. NOT generated here and NEVER defaulted: a request id
+		// is born at the caller and rides every HTTP call, NATS message and
+		// goroutine in the fleet, and a fabricated one is worse than an empty
+		// one because it looks like a trace and joins nothing.
+		//
+		// dhs-setup's consumer calls defolt-identity to resolve the owner, and
+		// identity 400s DL_REQUEST_ID_REQUIRED on any request without an
+		// X-Request-ID. Measured on the first production boot of dhs-setup
+		// v1.0.0: request_id was "" on every tenant, every identity lookup was
+		// refused, and the consumer fell back to the event's own name parts —
+		// a warning, a successful-looking provision, and a wrong name.
+		"request_id": reqid.From(ctx),
 	}
 	if t.ActivatedAt != nil {
 		p["activated_at"] = *t.ActivatedAt
@@ -448,7 +507,7 @@ func (s *TenantsService) ActivateExploring(ctx context.Context, id uuid.UUID) (*
 		return nil, false, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
-	s.emit("tenant.activated", activatedPayload(t))
+	s.emit("tenant.activated", activatedPayload(ctx, t))
 	logger.LogInfo("activate-exploring", fmt.Sprintf("tenant=%s slug=%s product=%s is exploring and is now active; tenant.activated published", t.ID, t.Slug, t.Product))
 	return t, true, nil
 }
@@ -521,7 +580,7 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 	})
 
 	if oldStatus == model.StatusPendingPayment && newStatus == model.StatusActive {
-		s.emit("tenant.activated", activatedPayload(t))
+		s.emit("tenant.activated", activatedPayload(ctx, t))
 	}
 
 	return t, nil

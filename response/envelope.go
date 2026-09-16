@@ -122,6 +122,24 @@ var (
 		Code string
 		Meta Meta
 	}{"DL_TENANT_NO_OWNER", Meta{EN: "No owner account could be resolved for this tenant.", SW: "Akaunti ya mmiliki haikupatikana kwa mteja huyu."}}
+	// ErrTenantOwnerRequired is the internal POST /tenants refusal for a
+	// health tenant created with no owner.
+	//
+	// It names BOTH halves deliberately: WHICH product demands an owner,
+	// and that this request carried none. A bare "validation failed" leaves
+	// the caller to guess which of the two is wrong. The refusal exists
+	// because the quiet version of it cost a live clinic: an ownerless
+	// health tenant is created, activated, and dhs-setup then logs
+	// "admin mirror NOT created" — the facility exists and nobody can log
+	// into it. Distinct from ErrTenantNoOwner above, which is a LOOKUP
+	// failing on an existing tenant, not a create being refused.
+	ErrTenantOwnerRequired = struct {
+		Code string
+		Meta Meta
+	}{"DL_TENANT_OWNER_REQUIRED", Meta{
+		EN: "The health product requires an owner on every tenant, and this request named none. Send owner_user_id.",
+		SW: "Bidhaa ya afya inahitaji mmiliki kwa kila mteja, na ombi hili halikumtaja yeyote. Tuma owner_user_id.",
+	}}
 	ErrBillingUnavailable = struct {
 		Code string
 		Meta Meta

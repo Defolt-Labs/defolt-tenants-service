@@ -54,7 +54,7 @@ func TestActivatedPayloadCarriesWhatTheConsumersNeed(t *testing.T) {
 		Product: "health", ContactEmail: "owner@example.com",
 		OwnerUserID: &owner, OwnerFirstName: "Rachel", OwnerLastName: "Mhaville",
 	}
-	p := activatedPayload(tn)
+	p := activatedPayload(context.Background(), tn)
 
 	// OwnerEmail is set by the public signup form and by nothing else. A
 	// tenant created through the internal route has only ContactEmail, and an
@@ -76,7 +76,7 @@ func TestActivatedPayloadCarriesWhatTheConsumersNeed(t *testing.T) {
 
 	// The explicit owner email still wins when signup recorded one.
 	tn.OwnerEmail = "signed-up@example.com"
-	if p := activatedPayload(tn); p["owner_email"] != "signed-up@example.com" {
+	if p := activatedPayload(context.Background(), tn); p["owner_email"] != "signed-up@example.com" {
 		t.Fatalf("owner_email = %v, want the signup email", p["owner_email"])
 	}
 
@@ -84,7 +84,7 @@ func TestActivatedPayloadCarriesWhatTheConsumersNeed(t *testing.T) {
 	now := time.Now()
 	end := now.Add(7 * 24 * time.Hour)
 	tn.TrialStartsAt, tn.TrialEndsAt, tn.ActivatedAt = &now, &end, &now
-	p = activatedPayload(tn)
+	p = activatedPayload(context.Background(), tn)
 	if p["trial_ends_at"] != end || p["activated_at"] != now {
 		t.Fatalf("the paid path's trial window and activation moment must still ride: %v", p)
 	}

@@ -50,6 +50,10 @@ var allowedIdentifiers = map[string]string{
 	"service/product.go::ProductReturnURL": "where Selcom returns the payer, per " +
 		"product namespace, built on ProductHome above — the namespace, not a " +
 		"retail product",
+	"service/service.go::RequireOwnerForProduct": "decides whether a tenant in a " +
+		"given product NAMESPACE (health) must name an owner before it may be " +
+		"created. The namespace is the input precisely because it is what varies, " +
+		"and the rule is the platform's own — not a retail product",
 }
 
 // knownCoupling is the debt ledger: product vocabulary that is real,
