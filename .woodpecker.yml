@@ -1,3 +1,29 @@
+# WP-CI3, 2026-09-19. Which agent may run this pipeline.
+#
+# UAT CI has had two agents since this date: the one in the cstaging cluster
+# and one on the owner's workstation. A workflow with no labels is taken by
+# whichever agent is free, and that is what makes a push fast. This block is
+# the single exception to it.
+#
+# CI_COMMIT_TAG is EMPTY on a push, and Woodpecker ignores a workflow label
+# whose value is empty, so on a push this block does nothing whatever and the
+# pipeline still runs wherever there is room. On a TAG the label carries the
+# tag, and a workflow label is only matched by an agent that declares the same
+# key; the in-cluster agent declares release=* and the workstation agent
+# declares no release label at all. So a tag can only run in the cluster. A
+# tag promotes with the production registry credentials and deploys with the
+# production ssh key, and those are not materialised in a container on a
+# workstation.
+#
+# Quoted deliberately. Unquoted, the empty expansion on a push leaves a bare
+# key whose value parses as null rather than the empty string. The quotes also
+# hold the line against the trap the promote-image comment describes below:
+# Woodpecker expands these braces over the raw text of this file before any
+# YAML is parsed, on every event, including the events whose steps will be
+# skipped.
+labels:
+  release: "${CI_COMMIT_TAG}"
+
 when:
   - event: push
     branch: staging
