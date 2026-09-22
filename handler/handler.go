@@ -58,6 +58,16 @@ func (h *Handlers) replayIdempotent(c *gin.Context) bool {
 		return false
 	}
 	if body, ok := h.cache.GetIdempotent(c.Request.Context(), key); ok {
+		// The stored body is the first request's answer. Its request_id is
+		// replaced with THIS request's, the one the header already echoes, so
+		// a replay never hands back an id the caller did not send. WP-SIGNUP1.
+		var env response.Envelope
+		if err := json.Unmarshal(body, &env); err == nil {
+			env.RequestID = response.RequestIDOf(c)
+			if b, err := json.Marshal(env); err == nil {
+				body = b
+			}
+		}
 		c.Data(http.StatusOK, "application/json; charset=utf-8", body)
 		return true
 	}
@@ -68,13 +78,18 @@ func (h *Handlers) replayIdempotent(c *gin.Context) bool {
 // Idempotency-Key is present, stores the serialized body for replay.
 func (h *Handlers) respondCreatedIdempotent(c *gin.Context, code string, meta response.Meta, data any) {
 	env := response.Envelope{Code: code, Meta: meta, Data: data}
-	body, err := json.Marshal(env)
+	stored, err := json.Marshal(env)
 	if err != nil {
 		response.Created(c, code, meta, data)
 		return
 	}
 	if key := idemKey(c); key != "" {
-		h.cache.StoreIdempotent(c.Request.Context(), key, body)
+		h.cache.StoreIdempotent(c.Request.Context(), key, stored)
+	}
+	env.RequestID = response.RequestIDOf(c)
+	body, err := json.Marshal(env)
+	if err != nil {
+		body = stored
 	}
 	c.Data(http.StatusCreated, "application/json; charset=utf-8", body)
 }
@@ -502,7 +517,12 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 	}
 	var body signupBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
+		writeSignupBindError(c, err)
+		return
+	}
+	if field := blankSignupField(body); field != "" {
+		meta, _ := response.SignupFieldRequired(field)
+		response.BadRequest(c, response.ErrSignupFieldRequired, meta, signupFieldDetails{Field: field})
 		return
 	}
 	res, err := h.svc.PublicSignup(c.Request.Context(), service.SignupInput{
@@ -520,19 +540,7 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		ClientIP:     c.ClientIP(),
 	}, h.ts)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrTurnstile):
-			response.Forbidden(c, response.ErrForbidden.Code, response.ErrForbidden.Meta)
-		case errors.Is(err, service.ErrSlugInvalid), errors.Is(err, service.ErrValidation):
-			response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
-		case errors.Is(err, service.ErrSlugReserved):
-			response.Conflict(c, response.ErrTenantSlugReserved.Code, response.ErrTenantSlugReserved.Meta, nil)
-		case errors.Is(err, service.ErrSlugTaken):
-			response.Conflict(c, response.ErrTenantSlugTaken.Code, response.ErrTenantSlugTaken.Meta, nil)
-		default:
-			c.Error(err)
-			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
-		}
+		writeSignupError(c, err)
 		return
 	}
 	h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, gin.H{
