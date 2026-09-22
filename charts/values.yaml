@@ -22,7 +22,12 @@ env:
   #
   # v0.3.0: a health signup that owes nothing answers active with no payment
   # step, and the signup no longer writes a stale status back (WP-SIGNUP2).
-  SERVICE_VERSION: "v0.3.0"
+  #
+  # v0.4.0: every public signup refusal names its reason with its own code and
+  # a sentence in en and sw (never the bare "Forbidden."), and every answer
+  # carries request_id in the body as well as the X-Request-ID header
+  # (WP-SIGNUP1).
+  SERVICE_VERSION: "v0.4.0"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"

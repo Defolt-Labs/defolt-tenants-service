@@ -11,10 +11,15 @@ import (
 
 	"defolt-tenants-service/logger"
 	"defolt-tenants-service/model"
+	"defolt-tenants-service/reqid"
 
 	"github.com/google/uuid"
 )
 
+// ErrTurnstile is the person's half of a failed human check: Cloudflare
+// looked at the token and refused it (invalid-input-response,
+// timeout-or-duplicate, missing-input-response). ErrTurnstileUnavailable in
+// turnstile.go is the server's half.
 var ErrTurnstile = errors.New("turnstile verification failed")
 
 // SignupInput is the public marketing signup body.
@@ -72,9 +77,16 @@ type SignupResult struct {
 // billing failures are non-fatal: the tenant record stays as
 // `pending_payment` and the sweep ticker cleans up abandoned rows.
 func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *Turnstile) (*SignupResult, error) {
+	// Every log line on this path carries the caller's request id. They
+	// all passed "" before WP-SIGNUP1, so the owner's refused signup logged
+	// request_id "" although the call had sent one and the answer echoed it.
+	rid := reqid.From(ctx)
 	if err := ts.Verify(ctx, in.TurnstileTok, in.ClientIP); err != nil {
-		logger.LogWarn("", "signup-turnstile", err.Error())
-		return nil, ErrTurnstile
+		logger.LogWarn(rid, "signup-turnstile", err.Error())
+		// The typed error goes back as it is: it wraps ErrTurnstile or
+		// ErrTurnstileUnavailable, and carries Cloudflare's codes for the
+		// answer's details.
+		return nil, err
 	}
 	if strings.TrimSpace(in.FirstName) == "" || strings.TrimSpace(in.LastName) == "" {
 		return nil, ErrValidation
@@ -197,7 +209,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// inserts a real, immediately loggable-in users row.
 	if s.identity != nil {
 		if identityErr != nil {
-			logger.LogWarn("", "signup-identity", fmt.Sprintf("tenant=%s email=%s: %v", t.ID, in.ContactEmail, identityErr))
+			logger.LogWarn(rid, "signup-identity", fmt.Sprintf("tenant=%s email=%s: %v", t.ID, in.ContactEmail, identityErr))
 			// Tenant record stays for support to unblock manually or the
 			// sweep ticker to reap.
 		} else {
@@ -222,7 +234,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// already stale, and a whole-row save wrote pending_payment back over
 	// active. WP-SIGNUP2.
 	if err := s.repo.SaveOwner(ctx, t); err != nil {
-		logger.LogWarn("", "signup-owner", fmt.Sprintf("tenant=%s: persisting owner fields failed: %v", t.ID, err))
+		logger.LogWarn(rid, "signup-owner", fmt.Sprintf("tenant=%s: persisting owner fields failed: %v", t.ID, err))
 	}
 
 	// Registration checkout. Non-fatal: an empty payment_url tells the
@@ -233,7 +245,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	if s.billing != nil {
 		switch {
 		case billErr != nil:
-			logger.LogWarn("", "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
+			logger.LogWarn(rid, "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
 		case checkout.NothingOwed():
 			// WP-SIGNUP2. No payment step: the clinic is exploring and owes
 			// nothing, so it is live now. Billing's own push normally
@@ -242,7 +254,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 			// says pending_payment for a clinic that owes nothing.
 			if checkout.State == "exploring" {
 				if _, _, aerr := s.ActivateExploring(ctx, t.ID); aerr != nil {
-					logger.LogWarn("", "signup-activate", fmt.Sprintf("tenant=%s: %v; the activation sweep will retry", t.ID, aerr))
+					logger.LogWarn(rid, "signup-activate", fmt.Sprintf("tenant=%s: %v; the activation sweep will retry", t.ID, aerr))
 				}
 			}
 			logger.LogInfo("signup-billing", fmt.Sprintf("tenant=%s: nothing owed (%s), no payment step", t.ID, checkout.State))
@@ -297,7 +309,7 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	if p, err := NormalisePhone(in.Phone); err == nil && p != "" && p != existing.Phone {
 		existing.Phone = p
 		if err := s.repo.Save(ctx, existing); err != nil {
-			logger.LogWarn("", "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
+			logger.LogWarn(reqid.From(ctx), "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
 		}
 	}
 	return existing, nil

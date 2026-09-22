@@ -95,6 +95,9 @@ func CORS() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Internal-Service-Key, Idempotency-Key, X-Defolt-Product")
+		// The screen prints the request id as a reference; a browser on another
+		// origin can read only the response headers that are exposed. WP-SIGNUP1.
+		c.Header("Access-Control-Expose-Headers", "X-Request-ID")
 		c.Header("Access-Control-Max-Age", "600")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
