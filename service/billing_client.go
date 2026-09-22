@@ -56,6 +56,18 @@ type CheckoutResult struct {
 	PaymentURL string `json:"payment_url"`
 	Reference  string `json:"reference"`
 	ExpiresAt  string `json:"expires_at"`
+	// Owed is false when billing opened no checkout because nothing is
+	// owed (WP-SIGNUP2): a health clinic signs up exploring, with no
+	// invoice. Absent on a real checkout, so nil means owed.
+	Owed *bool `json:"owed"`
+	// State is the subscription's state on a nothing-owed answer.
+	State string `json:"state"`
+}
+
+// NothingOwed is billing saying there is no payment step, which is an
+// answer and not a failure.
+func (r *CheckoutResult) NothingOwed() bool {
+	return r != nil && r.Owed != nil && !*r.Owed
 }
 
 // CreateCheckout asks billing for a Selcom checkout URL covering the
@@ -95,7 +107,11 @@ func (c *BillingClient) CreateCheckout(ctx context.Context, tenantID uuid.UUID, 
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, fmt.Errorf("billing CreateCheckout: bad envelope: %w", err)
 	}
-	if env.Data.PaymentURL == "" {
+	// WP-SIGNUP2. An empty link is a failure only when something is owed.
+	// Billing answers 200 with owed false for a tenant that is exploring,
+	// and treating that as "checkout unavailable" logged a warning on every
+	// health signup and answered the owner pending_payment.
+	if env.Data.PaymentURL == "" && !env.Data.NothingOwed() {
 		return nil, fmt.Errorf("billing CreateCheckout: envelope missing payment_url")
 	}
 	return &env.Data, nil

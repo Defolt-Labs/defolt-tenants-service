@@ -120,6 +120,14 @@ func (r *Repo) Save(ctx context.Context, t *model.Tenant) error {
 	return r.db.WithContext(ctx).Save(t).Error
 }
 
+// SaveOwner writes the owner's fields and nothing else, so a caller holding
+// a stale copy of the row cannot write its status back (WP-SIGNUP2).
+func (r *Repo) SaveOwner(ctx context.Context, t *model.Tenant) error {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
+		Select("owner_user_id", "owner_email", "owner_first_name", "owner_middle_name", "owner_last_name").
+		Updates(t).Error
+}
+
 // SetStatus updates a single column so partial writes stay minimal.
 // Skips the update when the tenant is already in the target state.
 func (r *Repo) SetStatus(ctx context.Context, id uuid.UUID, status model.TenantStatus) error {

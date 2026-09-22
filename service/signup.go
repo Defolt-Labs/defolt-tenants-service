@@ -216,7 +216,12 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 			}
 		}
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	// The owner's fields only, never the whole row. Billing activates an
+	// exploring tenant DURING the checkout call above (it pushes the state
+	// back to this service), so the `t` in hand can carry a status that is
+	// already stale, and a whole-row save wrote pending_payment back over
+	// active. WP-SIGNUP2.
+	if err := s.repo.SaveOwner(ctx, t); err != nil {
 		logger.LogWarn("", "signup-owner", fmt.Sprintf("tenant=%s: persisting owner fields failed: %v", t.ID, err))
 	}
 
@@ -226,12 +231,29 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// active and emits tenant.activated — dhs-setup's consumer then provisions
 	// the Facility Admin for a health tenant (drs-setup for a store).
 	if s.billing != nil {
-		if billErr != nil {
+		switch {
+		case billErr != nil:
 			logger.LogWarn("", "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
-		} else {
+		case checkout.NothingOwed():
+			// WP-SIGNUP2. No payment step: the clinic is exploring and owes
+			// nothing, so it is live now. Billing's own push normally
+			// activated it during the call; ActivateExploring is idempotent
+			// and covers the push that was lost, so the answer below never
+			// says pending_payment for a clinic that owes nothing.
+			if checkout.State == "exploring" {
+				if _, _, aerr := s.ActivateExploring(ctx, t.ID); aerr != nil {
+					logger.LogWarn("", "signup-activate", fmt.Sprintf("tenant=%s: %v; the activation sweep will retry", t.ID, aerr))
+				}
+			}
+			logger.LogInfo("signup-billing", fmt.Sprintf("tenant=%s: nothing owed (%s), no payment step", t.ID, checkout.State))
+		default:
 			out.PaymentURL = checkout.PaymentURL
 			out.AmountTZS = checkout.AmountTZS
 		}
+	}
+	// Answer the row as it stands, not the struct from before billing moved it.
+	if fresh, ferr := s.repo.FindByID(ctx, t.ID); ferr == nil {
+		out.Tenant = fresh
 	}
 	return out, nil
 }
