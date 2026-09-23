@@ -7,13 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	"defolt-tenants-service/logger"
 	"defolt-tenants-service/model"
 	"defolt-tenants-service/reqid"
-
-	"github.com/google/uuid"
 )
 
 // ErrTurnstile is the person's half of a failed human check: Cloudflare
@@ -161,65 +158,26 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	t.OwnerMiddleName = strings.TrimSpace(in.MiddleName)
 	t.OwnerLastName = strings.TrimSpace(in.LastName)
 
-	// Store Admin provisioning (defolt-identity) and registration
-	// checkout (defolt-billing, which itself reaches defolt-payment and
-	// from there Selcom's real gateway) don't depend on each other's
-	// result — billing only needs t.ID/t.OwnerEmail/in.RedirectURL,
-	// all already set above, not anything CreateUser returns. Run them
-	// concurrently rather than back to back: this was the single
-	// biggest chunk of the signup form's end-to-end wait, all of it
-	// spent blocked on one external call while a completely unrelated
-	// one sat idle. Each goroutine writes only its own local result;
-	// out/t are touched solely after both complete via wg.Wait(), so
-	// there is nothing to guard with a mutex.
-	var wg sync.WaitGroup
-	var identityUserID *uuid.UUID
-	var identityExisted bool
+	// Store Admin provisioning (defolt-identity).
+	// Identity registration and SaveOwner MUST run before billing checkout is
+	// requested: for exploring tenants (like health clinics), billing immediately
+	// activates the tenant during CreateCheckout and publishes tenant.activated.
+	// If billing ran concurrently, tenant.activated raced ahead of SaveOwner and
+	// was emitted with no owner_user_id (WP-ACT1).
 	var identityPassword string
-	var identityErr error
-	var checkout *CheckoutResult
-	var billErr error
-
 	if s.identity != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			identityPassword = generatePassword()
-			identityUserID, identityExisted, identityErr = s.identity.CreateUser(ctx, RegisterInput{
-				Email:      in.ContactEmail,
-				FirstName:  in.FirstName,
-				MiddleName: in.MiddleName,
-				LastName:   in.LastName,
-				Password:   identityPassword,
-			})
-		}()
-	}
-	if s.billing != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			checkout, billErr = s.billing.CreateCheckout(ctx, t.ID, t.OwnerEmail, in.RedirectURL)
-		}()
-	}
-	wg.Wait()
-
-	// Store Admin provisioning. The generated temp password IS the
-	// one-time password the owner logs in with, so it goes back in the
-	// signup response — which only means anything because CreateUser
-	// inserts a real, immediately loggable-in users row.
-	if s.identity != nil {
+		identityPassword = generatePassword()
+		identityUserID, identityExisted, identityErr := s.identity.CreateUser(ctx, RegisterInput{
+			Email:      in.ContactEmail,
+			FirstName:  in.FirstName,
+			MiddleName: in.MiddleName,
+			LastName:   in.LastName,
+			Password:   identityPassword,
+		})
 		if identityErr != nil {
 			logger.LogWarn(rid, "signup-identity", fmt.Sprintf("tenant=%s email=%s: %v", t.ID, in.ContactEmail, identityErr))
-			// Tenant record stays for support to unblock manually or the
-			// sweep ticker to reap.
 		} else {
 			t.OwnerUserID = identityUserID
-			// existed means identity kept the credential this person
-			// already has and ignored the one generated above. Returning
-			// that password would be actively harmful: it looks like the
-			// way in, and it is not. Say so instead, and let the frontend
-			// tell them their existing Defolt password (or Google) opens
-			// the new store.
 			out.OwnerExisting = identityExisted
 			if !identityExisted {
 				out.OneTimePassword = identityPassword
@@ -227,14 +185,9 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: owner already has a Defolt account, keeping their credential", t.ID))
 			}
 		}
-	}
-	// The owner's fields only, never the whole row. Billing activates an
-	// exploring tenant DURING the checkout call above (it pushes the state
-	// back to this service), so the `t` in hand can carry a status that is
-	// already stale, and a whole-row save wrote pending_payment back over
-	// active. WP-SIGNUP2.
-	if err := s.repo.SaveOwner(ctx, t); err != nil {
-		logger.LogWarn(rid, "signup-owner", fmt.Sprintf("tenant=%s: persisting owner fields failed: %v", t.ID, err))
+		if err := s.repo.SaveOwner(ctx, t); err != nil {
+			logger.LogWarn(rid, "signup-owner", fmt.Sprintf("tenant=%s: persisting owner fields failed: %v", t.ID, err))
+		}
 	}
 
 	// Registration checkout. Non-fatal: an empty payment_url tells the
@@ -242,7 +195,10 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// billing calls back /internal/tenants/:id/activate, which flips the tenant
 	// active and emits tenant.activated — dhs-setup's consumer then provisions
 	// the Facility Admin for a health tenant (drs-setup for a store).
+	var checkout *CheckoutResult
+	var billErr error
 	if s.billing != nil {
+		checkout, billErr = s.billing.CreateCheckout(ctx, t.ID, t.OwnerEmail, in.RedirectURL)
 		switch {
 		case billErr != nil:
 			logger.LogWarn(rid, "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
