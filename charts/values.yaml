@@ -27,7 +27,7 @@ env:
   # a sentence in en and sw (never the bare "Forbidden."), and every answer
   # carries request_id in the body as well as the X-Request-ID header
   # (WP-SIGNUP1).
-  SERVICE_VERSION: "v0.4.0"
+  SERVICE_VERSION: "v0.5.0"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"
