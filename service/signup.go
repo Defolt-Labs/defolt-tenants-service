@@ -11,6 +11,8 @@ import (
 	"defolt-tenants-service/logger"
 	"defolt-tenants-service/model"
 	"defolt-tenants-service/reqid"
+
+	"github.com/google/uuid"
 )
 
 // ErrTurnstile is the person's half of a failed human check: Cloudflare
@@ -177,7 +179,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		if identityErr != nil {
 			logger.LogWarn(rid, "signup-identity", fmt.Sprintf("tenant=%s email=%s: %v", t.ID, in.ContactEmail, identityErr))
 		} else {
-			t.OwnerUserID = identityUserID
+			applyIdentityOwner(t, identityUserID, identityExisted)
 			out.OwnerExisting = identityExisted
 			if !identityExisted {
 				out.OneTimePassword = identityPassword
@@ -224,6 +226,27 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		out.Tenant = fresh
 	}
 	return out, nil
+}
+
+// applyIdentityOwner records what identity answered about the owner on the
+// tenant row: the user id, and whether that identity already existed
+// (WP-SIGNUP5, published on tenant.activated as owner_existed).
+//
+// A RESUMED signup is the trap. The first attempt registered the owner and
+// identity answered "created"; the retry registers the same address again
+// and identity now answers DL_USER_EXISTS, because the first attempt made
+// it. Taking the second answer would publish owner_existed=true for an
+// account THIS signup minted, and the consumer would then skip the
+// must-change-password flag on a one-time password. So when the row already
+// names this same user, the first answer stands, including a null one on a
+// row made before the column existed: that is unknown, not true.
+func applyIdentityOwner(t *model.Tenant, userID *uuid.UUID, existed bool) {
+	if t.OwnerUserID != nil && userID != nil && *t.OwnerUserID == *userID {
+		return
+	}
+	t.OwnerUserID = userID
+	v := existed
+	t.OwnerExisted = &v
 }
 
 // resumeStalledSignup finds the tenant already squatting on this slug
