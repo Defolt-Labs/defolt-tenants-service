@@ -123,9 +123,17 @@ func (r *Repo) Save(ctx context.Context, t *model.Tenant) error {
 // SaveOwner writes the owner's fields and nothing else, so a caller holding
 // a stale copy of the row cannot write its status back (WP-SIGNUP2).
 func (r *Repo) SaveOwner(ctx context.Context, t *model.Tenant) error {
+	return r.saveOwnerQuery(ctx, t).Error
+}
+
+// saveOwnerQuery is SaveOwner's statement, split out so a dry-run test can
+// read the columns it writes. owner_existed is in the list because the
+// signup learns it from identity in the same breath as owner_user_id, and a
+// column missing from a Select list is silently never written (WP-SIGNUP5).
+func (r *Repo) saveOwnerQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
 	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
-		Select("owner_user_id", "owner_email", "owner_first_name", "owner_middle_name", "owner_last_name").
-		Updates(t).Error
+		Select("owner_user_id", "owner_email", "owner_first_name", "owner_middle_name", "owner_last_name", "owner_existed").
+		Updates(t)
 }
 
 // SetStatus updates a single column so partial writes stay minimal.

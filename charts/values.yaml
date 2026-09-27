@@ -27,7 +27,15 @@ env:
   # a sentence in en and sw (never the bare "Forbidden."), and every answer
   # carries request_id in the body as well as the X-Request-ID header
   # (WP-SIGNUP1).
-  SERVICE_VERSION: "v0.5.0"
+  # v0.5.0: signup registers the owner and persists owner_user_id before the
+  # billing checkout, so tenant.activated never races ahead of it (WP-ACT1).
+  #
+  # v0.6.0: tenant.activated carries owner_existed, always a boolean: true
+  # when the owner's identity existed before this tenant (identity answered
+  # DL_USER_EXISTS, or the internal create attached an existing user), false
+  # when the signup minted it. Stored in a new nullable tenants.owner_existed
+  # column; null (older rows) is sent as false (WP-SIGNUP5).
+  SERVICE_VERSION: "v0.6.0"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"

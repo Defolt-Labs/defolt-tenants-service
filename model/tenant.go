@@ -99,6 +99,24 @@ type Tenant struct {
 	OwnerMiddleName string `gorm:"size:80" json:"owner_middle_name,omitempty"`
 	OwnerLastName   string `gorm:"size:80" json:"owner_last_name,omitempty"`
 
+	// OwnerExisted records whether the owner's identity existed BEFORE this
+	// tenant was made (WP-SIGNUP5). It rides on tenant.activated as
+	// `owner_existed`, so the consuming product can tell an owner who already
+	// holds a password they chose (a DRS shop owner opening a clinic) from one
+	// whose only credential is the one-time password this signup minted.
+	//
+	// It is PERSISTED because the event is not published by the request that
+	// learned the answer: identity answers during PublicSignup, and
+	// tenant.activated goes out later, from billing's activate callback, the
+	// subscription sync or the exploring sweep, each of which reads this row.
+	//
+	// Nullable on purpose. Null is "not known": every row made before the
+	// column, and an ownerless tenant. The event reads null as false, which is
+	// exactly what the consumer assumed before the field existed, so an
+	// unknown never switches a must-change-password flag OFF. Not on the read
+	// shape (json "-"): the event is the only contract this row asked for.
+	OwnerExisted *bool `gorm:"column:owner_existed" json:"-"`
+
 	// ActivatedAt is the moment this tenant became usable — the moment
 	// `tenant.activated` went out and its product provisioned it.
 	//

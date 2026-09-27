@@ -212,7 +212,25 @@ func newTenantFromCreate(in CreateInput, slug, phone string) *model.Tenant {
 		OwnerFirstName:  strings.TrimSpace(in.OwnerFirstName),
 		OwnerMiddleName: strings.TrimSpace(in.OwnerMiddleName),
 		OwnerLastName:   strings.TrimSpace(in.OwnerLastName),
+		OwnerExisted:    ownerExistedOnCreate(in.OwnerUserID),
 	}
+}
+
+// ownerExistedOnCreate answers owner_existed for a tenant made through
+// Create (WP-SIGNUP5). A caller that names owner_user_id is ATTACHING the
+// tenant to an identity that already exists: this service minted nothing and
+// issued no one-time password, so the credential is whatever that person
+// already holds. That is true, read off the request, not guessed.
+//
+// A create with no owner answers nil ("not known"). PublicSignup is that
+// case: it calls Create first and sets the flag from identity's own answer
+// in applyIdentityOwner.
+func ownerExistedOnCreate(owner *uuid.UUID) *bool {
+	if owner == nil || *owner == uuid.Nil {
+		return nil
+	}
+	v := true
+	return &v
 }
 
 // tenantCreatedPayload is the wire shape of tenant.created, split out from
@@ -434,6 +452,15 @@ func activatedPayload(ctx context.Context, t *model.Tenant) map[string]any {
 		"owner_first_name":  t.OwnerFirstName,
 		"owner_middle_name": t.OwnerMiddleName,
 		"owner_last_name":   t.OwnerLastName,
+		// WP-SIGNUP5. Whether the owner's identity existed before this tenant
+		// was made: true when identity answered DL_USER_EXISTS at signup, or
+		// the internal create attached an existing user; false when the
+		// signup minted the account and its one-time password. ALWAYS present
+		// and always a boolean: an unknown (a row older than the column, an
+		// ownerless tenant) is sent as false, which is what every consumer
+		// assumed before the key existed. Additive: dhs-setup and drs-setup
+		// decode into structs with encoding/json, which ignores an unknown key.
+		"owner_existed": t.OwnerExisted != nil && *t.OwnerExisted,
 		// Which product must provision this tenant. Additive; both consumers
 		// are bound to their own subject today and ignore it.
 		"product": t.Product,
