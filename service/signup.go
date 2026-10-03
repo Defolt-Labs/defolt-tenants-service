@@ -98,7 +98,9 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	// tenant differs (and downstream, which consumer picks up tenant.activated).
 	product := defaultStr(in.Product, "drs")
 
-	t, err := s.Create(ctx, CreateInput{
+	// createRow, not Create: the row is inserted here and tenant.created is
+	// announced below, once the owner is saved (WP-UATSW-2).
+	t, err := s.createRow(ctx, CreateInput{
 		Slug:         in.Slug,
 		Name:         in.Name,
 		ContactEmail: in.ContactEmail,
@@ -187,10 +189,23 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: owner already has a Defolt account, keeping their credential", t.ID))
 			}
 		}
-		if err := s.repo.SaveOwner(ctx, t); err != nil {
+		if err := s.rows.SaveOwner(ctx, t); err != nil {
 			logger.LogWarn(rid, "signup-owner", fmt.Sprintf("tenant=%s: persisting owner fields failed: %v", t.ID, err))
 		}
 	}
+
+	// tenant.created goes out HERE, once, and not at the insert (WP-UATSW-2).
+	// It is the first event a signup announces and it starts every race
+	// after it: billing seeds the subscription off it and pushes the state
+	// back, and that push activates the tenant and publishes tenant.activated
+	// from the row as it stands. Announced at the insert, the activation beat
+	// SaveOwner and went out with no owner_user_id (5fb30935, UAT 2026-10-03),
+	// which WP-ACT1's move of SaveOwner above the checkout did not reach.
+	// So it waits for the owner, on the fresh path, on a resumed signup
+	// (billing's seed and welcome are idempotent per tenant) and when identity
+	// failed (logged above; the row then has no owner whatever the order).
+	// The payload is unchanged.
+	s.emit("tenant.created", tenantCreatedPayload(t))
 
 	// Registration checkout. Non-fatal: an empty payment_url tells the
 	// frontend to surface the resend-payment-link path. On payment, defolt-
@@ -222,7 +237,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		}
 	}
 	// Answer the row as it stands, not the struct from before billing moved it.
-	if fresh, ferr := s.repo.FindByID(ctx, t.ID); ferr == nil {
+	if fresh, ferr := s.rows.FindByID(ctx, t.ID); ferr == nil {
 		out.Tenant = fresh
 	}
 	return out, nil
@@ -261,7 +276,7 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	// Scope the resume lookup to the same product namespace the retry is
 	// for, matching the (product, slug) uniqueness. A drs tenant on the
 	// same slug must not be mistaken for this health signup's stalled row.
-	existing, err := s.repo.FindBySlug(ctx, NormalizeProduct(in.Product), slug)
+	existing, err := s.rows.FindBySlug(ctx, NormalizeProduct(in.Product), slug)
 	if err != nil {
 		return nil, ErrSlugTaken
 	}
@@ -287,7 +302,7 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	// existed under the pre-13.7 code or with an earlier number.
 	if p, err := NormalisePhone(in.Phone); err == nil && p != "" && p != existing.Phone {
 		existing.Phone = p
-		if err := s.repo.Save(ctx, existing); err != nil {
+		if err := s.rows.Save(ctx, existing); err != nil {
 			logger.LogWarn(reqid.From(ctx), "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
 		}
 	}

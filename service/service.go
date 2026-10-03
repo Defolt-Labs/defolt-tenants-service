@@ -39,9 +39,9 @@ var (
 // admin mirror NOT created" and carries on. So an ownerless health tenant is
 // a clinic that exists, looks provisioned, and that nobody can sign into.
 //
-// WHY it is NOT inside Create: PublicSignup calls Create BEFORE it registers
-// the owner in defolt-identity — it runs identity and billing concurrently and
-// assigns OwnerUserID afterwards — so a guard inside Create would refuse every
+// WHY it is NOT inside Create: PublicSignup inserts the row (createRow) BEFORE
+// it registers the owner in defolt-identity and assigns OwnerUserID
+// afterwards, so a guard inside Create would refuse every
 // health signup the marketing form has ever made. The internal POST /tenants
 // route is the one door whose caller already holds the identity id and has
 // nowhere else to put it, so that is the door this guards.
@@ -68,8 +68,17 @@ var slugRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}[a-z0-9]$`)
 const pendingSweepLimit = 500
 
 type TenantsService struct {
-	repo     *repository.Repo
-	nc       *nats.Conn
+	repo *repository.Repo
+	// rows is the same repository as repo, seen through signupRows: the
+	// methods PublicSignup, resumeStalledSignup and createRow call. It is
+	// the seam that lets the ORDER of a signup (insert, identity, owner
+	// saved, tenant.created, checkout) be asserted with no database
+	// (WP-UATSW-2).
+	rows signupRows
+	nc   *nats.Conn
+	// publish is nc.Publish when there is a connection, nil otherwise. emit
+	// goes through it so a test can record what was published and when.
+	publish  func(subject string, data []byte) error
 	cache    *cache.Cache
 	identity *IdentityClient
 	billing  *BillingClient
@@ -85,7 +94,21 @@ func New(repo *repository.Repo, nc *nats.Conn, c *cache.Cache, identity *Identit
 	for _, r := range reserved {
 		set[strings.ToLower(strings.TrimSpace(r))] = struct{}{}
 	}
-	return &TenantsService{repo: repo, nc: nc, cache: c, identity: identity, billing: billing, reserved: set, rootDomain: rootDomain}
+	s := &TenantsService{repo: repo, rows: repo, nc: nc, cache: c, identity: identity, billing: billing, reserved: set, rootDomain: rootDomain}
+	if nc != nil {
+		s.publish = nc.Publish
+	}
+	return s
+}
+
+// signupRows holds exactly the *repository.Repo methods the signup path
+// calls. *repository.Repo satisfies it; a test supplies a recorder.
+type signupRows interface {
+	Insert(ctx context.Context, t *model.Tenant) error
+	FindByID(ctx context.Context, id uuid.UUID) (*model.Tenant, error)
+	FindBySlug(ctx context.Context, namespace, slug string) (*model.Tenant, error)
+	Save(ctx context.Context, t *model.Tenant) error
+	SaveOwner(ctx context.Context, t *model.Tenant) error
 }
 
 // CreateInput mirrors the POST /api/v1/tenants body. Product defaults
@@ -132,26 +155,12 @@ type CreateInput struct {
 	OwnerLastName   string
 }
 
+// Create is the internal POST /tenants door: the row, then tenant.created at
+// once. Its caller already holds the owner (or has none), so there is nothing
+// to wait for.
 func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Tenant, error) {
-	slug := strings.ToLower(strings.TrimSpace(in.Slug))
-	if !slugRegex.MatchString(slug) {
-		return nil, ErrSlugInvalid
-	}
-	if _, ok := s.reserved[slug]; ok {
-		return nil, ErrSlugReserved
-	}
-	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.ContactEmail) == "" {
-		return nil, ErrValidation
-	}
-	phone, err := RequirePhone(in.Phone)
+	t, err := s.createRow(ctx, in)
 	if err != nil {
-		return nil, err
-	}
-	t := newTenantFromCreate(in, slug, phone)
-	if err := s.repo.Insert(ctx, t); err != nil {
-		if errors.Is(err, repository.ErrSlugTaken) {
-			return nil, ErrSlugTaken
-		}
 		return nil, err
 	}
 	// tenant.created carries the NAMES, and it did not until now.
@@ -179,6 +188,41 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	// Every field is additive, so an existing consumer that decodes the old
 	// five is unaffected.
 	s.emit("tenant.created", tenantCreatedPayload(t))
+	return t, nil
+}
+
+// createRow validates and inserts the tenant and announces nothing.
+//
+// Split out of Create for PublicSignup (WP-UATSW-2). tenant.created is the
+// FIRST event a signup announces, and billing's consumer of it seeds the
+// subscription and pushes the state back, which activates the tenant and
+// publishes tenant.activated from the row as it stands. Emitted straight
+// after the insert, that whole chain ran while the signup was still inside
+// identity CreateUser, so the activation went out with no owner_user_id
+// (tenant 5fb30935 on UAT, 2026-10-03). PublicSignup therefore inserts here
+// and emits tenant.created itself, after the owner is saved.
+func (s *TenantsService) createRow(ctx context.Context, in CreateInput) (*model.Tenant, error) {
+	slug := strings.ToLower(strings.TrimSpace(in.Slug))
+	if !slugRegex.MatchString(slug) {
+		return nil, ErrSlugInvalid
+	}
+	if _, ok := s.reserved[slug]; ok {
+		return nil, ErrSlugReserved
+	}
+	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.ContactEmail) == "" {
+		return nil, ErrValidation
+	}
+	phone, err := RequirePhone(in.Phone)
+	if err != nil {
+		return nil, err
+	}
+	t := newTenantFromCreate(in, slug, phone)
+	if err := s.rows.Insert(ctx, t); err != nil {
+		if errors.Is(err, repository.ErrSlugTaken) {
+			return nil, ErrSlugTaken
+		}
+		return nil, err
+	}
 	return t, nil
 }
 
@@ -859,14 +903,14 @@ func (s *TenantsService) SweepExploringPending(ctx context.Context) (int, error)
 }
 
 func (s *TenantsService) emit(subject string, payload map[string]any) {
-	if s.nc == nil {
+	if s.publish == nil {
 		return
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return
 	}
-	_ = s.nc.Publish(subject, b)
+	_ = s.publish(subject, b)
 }
 
 func defaultStr(v, def string) string {
