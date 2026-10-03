@@ -35,7 +35,12 @@ env:
   # DL_USER_EXISTS, or the internal create attached an existing user), false
   # when the signup minted it. Stored in a new nullable tenants.owner_existed
   # column; null (older rows) is sent as false (WP-SIGNUP5).
-  SERVICE_VERSION: "v0.6.0"
+  #
+  # v0.7.0: tenant.created waits for the owner. A public signup announces it
+  # after identity and SaveOwner and before the checkout, so no activation it
+  # causes goes out without owner_user_id. Payload unchanged; the internal
+  # POST /tenants route still announces at once (WP-UATSW-2, WP-ACT1).
+  SERVICE_VERSION: "v0.7.0"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"
