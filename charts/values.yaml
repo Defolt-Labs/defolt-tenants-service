@@ -40,7 +40,7 @@ env:
   # after identity and SaveOwner and before the checkout, so no activation it
   # causes goes out without owner_user_id. Payload unchanged; the internal
   # POST /tenants route still announces at once (WP-UATSW-2, WP-ACT1).
-  SERVICE_VERSION: "v0.7.0"
+  SERVICE_VERSION: "v0.7.1"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"

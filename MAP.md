@@ -33,4 +33,4 @@
 
 - `go test ./... -count=1`
 
-SERVICE_VERSION: v0.7.0  (repo defolt-tenants-service)
+SERVICE_VERSION: v0.7.1  (repo defolt-tenants-service)

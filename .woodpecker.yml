@@ -42,7 +42,7 @@ steps:
     # patient, practitioner, bed, prescription). §9.1's audit found six of
     # seven platform services already clean; this is what keeps them that
     # way, because the audit was a snapshot and nothing was checking it.
-    image: golang:1.25-alpine
+    image: golang:1.26-alpine
     commands:
       - apk add --no-cache git
       - go mod download
