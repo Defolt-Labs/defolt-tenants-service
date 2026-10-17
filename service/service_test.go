@@ -2,16 +2,15 @@ package service
 
 import (
 	"context"
-	"testing"
-
 	"defolt-tenants-service/model"
+	"testing"
 
 	"github.com/google/uuid"
 )
 
-// TestWPACT1_ActivatedPayloadRequiresOwnerUserID ensures that an activated payload
+// TestActivatedPayloadRequiresOwnerUserID ensures that an activated payload
 // for a health tenant carries a non-nil owner_user_id.
-func TestWPACT1_ActivatedPayloadRequiresOwnerUserID(t *testing.T) {
+func TestActivatedPayloadRequiresOwnerUserID(t *testing.T) {
 	ownerID := uuid.New()
 	tenant := &model.Tenant{
 		ID:             uuid.New(),
