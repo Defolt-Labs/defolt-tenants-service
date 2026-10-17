@@ -13,19 +13,7 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// WP-SIGNUP1. Every refusal the public signup can give answers with its own
-// code and a sentence in en and sw that names what is wrong.
-//
-// The owner saw a red box reading only "Forbidden." on 2026-09-20. The server
-// had logged the reason (turnstile failed: [invalid-input-secret]) and threw
-// it away at this boundary, which mapped every failed human check, and every
-// Cloudflare fault, onto DL_FORBIDDEN, the code the internal-key gate uses for
-// a missing service key. The same flattening held for the body: a bad email, a
-// missing phone and a malformed slug all answered DL_VALIDATION_FAILED
-// "Request could not be validated." with a Go validator string in details.
-
-// signupJSONField maps the signupBody struct fields to the json keys a caller
-// sent, so a refusal names the field the form knows.
+// signupJSONField maps signup body struct fields to json parameter names.
 var signupJSONField = map[string]string{
 	"Slug":         "slug",
 	"Name":         "name",
@@ -40,7 +28,7 @@ type signupFieldDetails struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// writeSignupBindError answers a body that did not bind.
+// writeSignupBindError translates request binding failures to localized responses.
 func writeSignupBindError(c *gin.Context, err error) {
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) && len(ve) > 0 {
@@ -68,9 +56,7 @@ func writeSignupBindError(c *gin.Context, err error) {
 	response.BadRequest(c, response.ErrValidation.Code, response.ErrValidation.Meta, err.Error())
 }
 
-// blankSignupField names the first required field that holds only spaces.
-// binding:"required" passes "   ", and the service would then refuse it as a
-// bare ErrValidation that cannot say which field it was.
+// blankSignupField finds the first required field containing only whitespace.
 func blankSignupField(b signupBody) string {
 	for _, f := range []struct{ key, val string }{
 		{"slug", b.Slug}, {"name", b.Name}, {"contact_email", b.ContactEmail},
@@ -83,7 +69,7 @@ func blankSignupField(b signupBody) string {
 	return ""
 }
 
-// writeSignupError answers a refusal from service.PublicSignup.
+// writeSignupError maps service signup failures to HTTP responses.
 func writeSignupError(c *gin.Context, err error) {
 	var te *service.TurnstileError
 	reason := ""
@@ -92,8 +78,6 @@ func writeSignupError(c *gin.Context, err error) {
 	}
 	switch {
 	case errors.Is(err, service.ErrTurnstileUnavailable):
-		// The person did nothing wrong: the check could not be made. A 503,
-		// so it is logged with its cause by the 5xx funnel.
 		c.Error(err)
 		response.ServiceUnavailableDetails(c, response.ErrSignupHumanCheckUnavailable.Code, response.ErrSignupHumanCheckUnavailable.Meta, signupFieldDetails{Field: "turnstile_token", Reason: reason})
 	case errors.Is(err, service.ErrTurnstile):

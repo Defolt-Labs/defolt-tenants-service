@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"defolt-tenants-service/model"
+	"defolt-tenants-service/repository"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,19 +13,16 @@ import (
 	"sync"
 	"testing"
 
-	"defolt-tenants-service/model"
-	"defolt-tenants-service/repository"
-
 	"github.com/google/uuid"
 )
 
-// WP-UATSW-2 (publisher half) and WP-ACT1. Measured on UAT 2026-10-03,
+// Measured on UAT 2026-10-03,
 // tenant 5fb30935: PublicSignup published tenant.created straight after the
 // insert, billing seeded the subscription exploring off it and pushed the
 // state back, and SyncSubscriptionState published tenant.activated from the
 // row while the signup was still inside identity CreateUser, so the event had
-// no owner_user_id and dhs-setup parked it. WP-ACT1's test asserted the
-// activation payload only, never the order, so it stayed green.
+// no owner_user_id and dhs-setup parked it. The activation payload test asserted
+// only the payload, never the order, so it stayed green.
 //
 // This test records ONE ordered log across the repository, identity, the
 // publisher and billing, and asserts where tenant.created sits in it.
@@ -249,7 +248,7 @@ func assertPayloadUnchanged(t *testing.T, l *orderLog, row *model.Tenant) {
 }
 
 // (a) A health signup.
-func TestUATSW2_HealthSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
+func TestHealthSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 	rig := newOrderRig(t, http.StatusCreated)
 	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-health-1"), NewTurnstile(""))
 	if err != nil {
@@ -263,7 +262,7 @@ func TestUATSW2_HealthSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) 
 }
 
 // (b) DRS gets the same order.
-func TestUATSW2_DRSSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
+func TestDRSSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 	rig := newOrderRig(t, http.StatusCreated)
 	if _, err := rig.svc.PublicSignup(context.Background(), signupInput("drs", "order-drs-1"), NewTurnstile("")); err != nil {
 		t.Fatalf("PublicSignup: %v", err)
@@ -274,7 +273,7 @@ func TestUATSW2_DRSSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 
 // (c) Identity answers 500: the row has no owner, and tenant.created still
 // goes out once, after the SaveOwner attempt and before the checkout.
-func TestUATSW2_IdentityFailureStillPublishesOnceAfterSaveOwner(t *testing.T) {
+func TestIdentityFailureStillPublishesOnceAfterSaveOwner(t *testing.T) {
 	rig := newOrderRig(t, http.StatusInternalServerError)
 	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-idfail-1"), NewTurnstile(""))
 	if err != nil {
@@ -289,7 +288,7 @@ func TestUATSW2_IdentityFailureStillPublishesOnceAfterSaveOwner(t *testing.T) {
 
 // (d) A resumed signup: the slug is taken by the same email, still
 // pending_payment. tenant.created is published once, after the owner.
-func TestUATSW2_ResumedSignupPublishesOnce(t *testing.T) {
+func TestResumedSignupPublishesOnce(t *testing.T) {
 	rig := newOrderRig(t, http.StatusCreated)
 	existing := &model.Tenant{
 		ID:             uuid.New(),
@@ -320,7 +319,7 @@ func TestUATSW2_ResumedSignupPublishesOnce(t *testing.T) {
 
 // (e) Control: the internal POST /tenants route publishes tenant.created
 // immediately after the insert, once, as it always has.
-func TestUATSW2_InternalCreatePublishesImmediately(t *testing.T) {
+func TestInternalCreatePublishesImmediately(t *testing.T) {
 	rig := newOrderRig(t, http.StatusCreated)
 	if _, err := rig.svc.Create(context.Background(), CreateInput{
 		Slug:         "order-internal-1",

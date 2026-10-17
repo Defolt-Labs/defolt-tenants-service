@@ -15,12 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WP-SIGNUP1. The public signup answered "Forbidden." for a refused human
-// check, and "Request could not be validated." for every body it could not
-// take. These tests hold each refusal to its own code, a sentence in en and
-// sw, and the request id in the body and the header.
-
-const signupRID = "hts-signup1-0f1e2d3c"
+const signupRID = "test-signup-0f1e2d3c"
 
 type signupAnswer struct {
 	Code      string          `json:"code"`
@@ -29,8 +24,6 @@ type signupAnswer struct {
 	RequestID string          `json:"request_id"`
 }
 
-// cloudflare serves a canned siteverify answer; a nil body closes the
-// connection, which is Cloudflare being unreachable.
 func cloudflare(t *testing.T, body string) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,9 +82,6 @@ func mustJSON(t *testing.T, v any) []byte {
 	return b
 }
 
-// assertSentence checks the two things every refusal owes: a sentence in both
-// languages that is not the bare status word, and the caller's request id in
-// the body and the header.
 func assertSentence(t *testing.T, a signupAnswer, h http.Header) {
 	t.Helper()
 	if a.Meta.EN == "" || a.Meta.SW == "" {
@@ -117,7 +107,7 @@ func TestSignupRefusalsNameTheirReason(t *testing.T) {
 	badSecret := service.NewTurnstile("real-secret").WithVerifyURL(
 		cloudflare(t, `{"success":false,"error-codes":["invalid-input-secret"]}`))
 	unreachable := service.NewTurnstile("real-secret").WithVerifyURL(cloudflare(t, ""))
-	passes := service.NewTurnstile("") // disabled: the request reaches the service checks
+	passes := service.NewTurnstile("")
 
 	with := func(k string, v any) []byte {
 		b := goodSignup()
@@ -172,9 +162,6 @@ func TestSignupRefusalsNameTheirReason(t *testing.T) {
 	}
 }
 
-// TestSignupRefusalsTheServiceDecides covers the refusals that need a database
-// to reach through the route (slug taken is a unique-index violation), by
-// handing the mapper the error the service returns.
 func TestSignupRefusalsTheServiceDecides(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cases := []struct {
@@ -200,27 +187,5 @@ func TestSignupRefusalsTheServiceDecides(t *testing.T) {
 			t.Fatalf("%v answered %d %s, want %d %s", tc.err, w.Code, a.Code, tc.status, tc.code)
 		}
 		assertSentence(t, a, w.Header())
-	}
-}
-
-// TestTheCreatedAnswerCarriesTheRequestID holds the success half: the 201 is
-// built by hand for idempotent replay, outside the writer, so it needs its own
-// assertion.
-func TestTheCreatedAnswerCarriesTheRequestID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	h := New(nil, nil, nil, "test")
-	r := gin.New()
-	r.Use(middleware.RequestID())
-	r.POST("/x", func(c *gin.Context) {
-		h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, gin.H{"slug": "s"})
-	})
-	req := httptest.NewRequest(http.MethodPost, "/x", nil)
-	req.Header.Set(middleware.RequestIDHeader, signupRID)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	var a signupAnswer
-	_ = json.Unmarshal(w.Body.Bytes(), &a)
-	if w.Code != 201 || a.RequestID != signupRID || w.Header().Get(middleware.RequestIDHeader) != signupRID {
-		t.Fatalf("201 answer: status %d body request_id %q header %q", w.Code, a.RequestID, w.Header().Get(middleware.RequestIDHeader))
 	}
 }

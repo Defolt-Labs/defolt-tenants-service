@@ -9,10 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// WP-SIGNUP2. Billing answers a health signup's checkout with 200, an empty
-// payment_url and owed false, because the clinic is exploring and owes
-// nothing. That is an answer, not a failure; a real checkout with no link
-// still is one.
 func TestCreateCheckoutNothingOwedIsAnAnswer(t *testing.T) {
 	for _, tc := range []struct {
 		name, body  string
