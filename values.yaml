@@ -1,0 +1,60 @@
+# defolt-tenants-service: shared tenant registry.
+name: defolt-tenants-service
+namespace: defolt-platform
+
+image:
+  repository: registry.uat.defoltlabs.com/defolt-tenants-service
+  tag: latest
+
+port: 8080
+
+env:
+  SERVICE_VERSION: "v0.7.1"
+  SERVER_PORT: "8080"
+  DB_HOST: defolt-postgres
+  DB_PORT: "5432"
+  DB_NAME: defolt_tenants
+  DB_USER: defolt_tenants
+  DB_SSLMODE: disable
+  NATS_URL: nats://defolt-nats:4222
+  REDIS_URL: redis://defolt-redis:6379
+  AUTO_MIGRATE: "true"
+  # Slugs reserved to prevent collision with platform infrastructure.
+  RESERVED_SLUGS: "www,api,app,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat,shop,staging,secrets,s3,registry,vps"
+  DEFOLT_IDENTITY_URL: http://defolt-identity-service:8080
+  DEFOLT_BILLING_URL: http://defolt-billing-service:8080
+  # DNS root for customer-facing hosts.
+  PUBLIC_ROOT_DOMAIN: uat.defoltlabs.com
+
+envFile:
+  enabled: true
+  secretName: platform-env
+
+autoscaling:
+  enabled: false
+replicas: 3
+
+pdb:
+  enabled: true
+  minAvailable: 2
+
+ingress:
+  excludeInternalPaths: true
+  securityHeaders: true
+  extraExcludes:
+    - "^/api/v1/internal"
+  host: defolt.api.uat.defoltlabs.com
+  stripPrefix: false
+  paths:
+    - /public
+    - /api/v1
+  tls:
+    secretName: defolt-api-uat-tls
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: "500m"
+    memory: 256Mi

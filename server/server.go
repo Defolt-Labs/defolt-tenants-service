@@ -12,6 +12,7 @@ import (
 	"defolt-tenants-service/logger"
 	"defolt-tenants-service/middleware"
 	"defolt-tenants-service/repository"
+	"defolt-tenants-service/routes"
 	"defolt-tenants-service/service"
 
 	"github.com/gin-gonic/gin"
@@ -23,13 +24,7 @@ const (
 	sweepFirstDelay = 1 * time.Minute
 	sweepInterval   = 15 * time.Minute
 
-	// WP-B16. The activation sweep runs BEFORE the abandonment sweep's
-	// first pass, and that ordering is load bearing rather than tidy: the
-	// two look at the same rows and one of them deletes. Activating first
-	// means a tenant stranded by WP-B15 is provisioned rather than
-	// examined for reaping. (The abandonment sweeper refuses to delete a
-	// live tenant on its own too — see abandonBlocked — so this is the
-	// second of two independent guards, not the only one.)
+	// The activation sweep must run before the first reap: both read the same rows and reaping deletes.
 	exploreSweepFirstDelay = 20 * time.Second
 	exploreSweepInterval   = 1 * time.Hour
 )
@@ -78,41 +73,7 @@ func Initialize() (*App, error) {
 	engine := gin.New()
 	engine.Use(gin.Recovery(), middleware.CORS(), middleware.RequestID())
 
-	engine.GET("/health", h.Health)
-	engine.GET("/ready", h.Health)
-
-	// Public read: rate-limit at Traefik so the fleet edge absorbs
-	// enumeration attempts. Redis fronts the by-slug lookup with a
-	// 30s TTL inside the service layer.
-	pub := engine.Group("/api/v1")
-	{
-		pub.GET("/tenants/by-slug/:slug", h.GetBySlug)
-		pub.POST("/public/signup", h.PublicSignup)
-	}
-
-	// Internal service-to-service admin routes.
-	internal := engine.Group("/api/v1", middleware.InternalServiceKey(cfg.InternalServiceKey))
-	{
-		internal.POST("/tenants", h.Create)
-		internal.GET("/tenants/:id", h.Get)
-		internal.PATCH("/tenants/:id", h.Patch)
-		internal.POST("/tenants/:id/suspend", h.Suspend)
-		internal.POST("/tenants/:id/restore", h.Restore)
-		internal.POST("/tenants/:id/reissue-owner-otp", h.ReissueOwnerOTP)
-		internal.POST("/tenants/:id/resend-payment-link", h.ResendPaymentLink)
-		internal.GET("/tenants/pending-checkout", h.PendingCheckoutByEmail)
-		internal.GET("/tenants/:id/health", h.TenantHealth)
-		internal.POST("/internal/tenants/:id/activate", h.Activate)
-		internal.PUT("/internal/tenants/:id/subscription-state", h.SyncSubscriptionState)
-		internal.POST("/internal/sweep-exploring", h.SweepExploring)
-	}
-
-	// Traefik forward-auth entry point. Public because Traefik is the
-	// only caller and the ingress network policy prevents anyone else
-	// from reaching it. Response body is always empty; headers do the
-	// work, and the SPA renders the lifecycle screens itself.
-	engine.POST("/internal/resolve-host", h.ResolveHost)
-	engine.GET("/internal/resolve-host", h.ResolveHost)
+	routes.Mount(routes.Config{Engine: engine, Config: cfg, Handlers: h})
 
 	app := &App{Config: cfg, Engine: engine, DB: db, NC: nc, Cache: rc}
 	app.startSweeper(svc)
@@ -120,9 +81,7 @@ func Initialize() (*App, error) {
 	return app, nil
 }
 
-// startSweeper runs the abandoned-signup reaper (plan §5.11): first
-// pass one minute after boot, then every 15 minutes, until Cleanup
-// cancels the context.
+// startSweeper reaps abandoned pending_payment signups one minute after boot, then every 15 minutes.
 func (a *App) startSweeper(svc *service.TenantsService) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a.stopSweeper = cancel
@@ -161,10 +120,7 @@ func (a *App) startSweeper(svc *service.TenantsService) {
 	}()
 }
 
-// startExploreActivator runs WP-B16's activation sweep: 20 seconds after
-// boot, then hourly. The boot pass is what provisions the tenants WP-B15
-// stranded, so the deploy of this change is itself the data fix and there
-// is no migration to run by hand.
+// startExploreActivator activates pending exploring tenants 20 seconds after boot, then hourly.
 func (a *App) startExploreActivator(svc *service.TenantsService) {
 	ctx, cancel := context.WithCancel(context.Background())
 	prev := a.stopSweeper

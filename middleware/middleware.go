@@ -8,10 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// CtxInternalCaller names the caller whose key authenticated the request, from
-// INTERNAL_SERVICE_KEYS. "legacy" when a single unnamed key is still in use.
-// A LABEL for logs and for the per-caller rotation this is a step towards —
-// never an authorisation input on its own.
+// CtxInternalCaller stores the matched caller name in context.
 const CtxInternalCaller = "auth.internal_caller"
 
 const (
@@ -21,11 +18,7 @@ const (
 	TenantSlugHeader    = "X-Defolt-Tenant-Slug"
 	TenantProductHeader = "X-Defolt-Tenant-Product"
 	TenantStatusHeader  = "X-Defolt-Tenant-Status"
-	// ProductHeader is the REQUEST-side product signal the edge sends so
-	// slug resolution can be scoped per product. Distinct from the
-	// response-side TenantProductHeader (service → downstream): this one
-	// is edge/caller → this service. Set it on a per-product ingress; the
-	// host suffix is the fallback when it is absent.
+	// ProductHeader carries the request-side product namespace signal.
 	ProductHeader = "X-Defolt-Product"
 )
 
@@ -36,9 +29,6 @@ func RequestID() gin.HandlerFunc {
 			id = "unknown-" + uuid.NewString()[:8]
 		}
 		c.Set("request_id", id)
-		// Also carry it on the request context: handlers pass
-		// c.Request.Context() down, and the outbound service clients
-		// must forward the ID or defolt-identity rejects the call.
 		c.Request = c.Request.WithContext(reqid.With(c.Request.Context(), id))
 		c.Writer.Header().Set(RequestIDHeader, id)
 		c.Next()
@@ -54,14 +44,8 @@ func GetRequestID(c *gin.Context) string {
 	return ""
 }
 
-// InternalServiceKey gates the /api/v1/tenants create + admin routes
-// to service-to-service callers only. Constant-time compare to keep
-// timing attacks off the table.
+// InternalServiceKey gates internal routes using constant-time key comparison.
 func InternalServiceKey(sharedSecret string) gin.HandlerFunc {
-	// WP-SEC4 H1: sharedSecret may now be a NAMED SET
-	// ("platform=…,dhs=…,drs=…") so each namespace holds its own key and a
-	// compromised pod yields one of them rather than all of them. A single
-	// bare value still works — see internal_keyset.go.
 	keys := parseKeySet(sharedSecret)
 	return func(c *gin.Context) {
 		caller, ok := keys.match(c.GetHeader(InternalKeyHeader))
@@ -75,28 +59,12 @@ func InternalServiceKey(sharedSecret string) gin.HandlerFunc {
 	}
 }
 
-// CORS is a permissive dev-friendly setup; production tightens it at
-// the Traefik ingress. Kept here for symmetry with the fleet.
-//
-// Idempotency-Key is in the allow-list because the signup POST is
-// moving out of this service's own embedded page and into drs-vue,
-// which is served from a different origin (the SPA sits on the apex or
-// on a tenant subdomain, the API answers on the apex). A same-origin
-// post never triggered a preflight, so the omission was invisible; a
-// cross-origin one fails preflight and the request is never sent at
-// all. Curl will not catch this: it returns 204 regardless, because the
-// allow-list is enforced by the browser, not the server.
-//
-// Access-Control-Max-Age caches the preflight so the slug-availability
-// lookup and the signup POST do not pay for an extra round trip on
-// every keystroke-driven retry.
+// CORS attaches standard CORS headers for cross-origin browser callers.
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Internal-Service-Key, Idempotency-Key, X-Defolt-Product")
-		// The screen prints the request id as a reference; a browser on another
-		// origin can read only the response headers that are exposed. WP-SIGNUP1.
 		c.Header("Access-Control-Expose-Headers", "X-Request-ID")
 		c.Header("Access-Control-Max-Age", "600")
 		if c.Request.Method == "OPTIONS" {

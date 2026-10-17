@@ -1,11 +1,4 @@
-// Package cache wraps the shared fleet Redis for the two things this
-// service needs it for (plan §5.3, §5.13, §5.19):
-//
-//  1. the 30-second slug-lookup cache in front of resolve-host, and
-//  2. best-effort Idempotency-Key replay storage (24h TTL).
-//
-// The whole package is nil-safe: if Redis is unreachable at boot the
-// service runs cache-less and every method degrades to a no-op / miss.
+// Package cache wraps Redis for slug lookup and idempotency caching.
 package cache
 
 import (
@@ -26,8 +19,7 @@ type Cache struct {
 	rdb *redis.Client
 }
 
-// Connect parses REDIS_URL and pings once. Failure is non-fatal: we
-// log and return nil so callers fall through to Postgres.
+// Connect parses REDIS_URL and returns a client, falling back to nil on error.
 func Connect(redisURL string) *Cache {
 	if redisURL == "" {
 		logger.LogInfo("cache", "REDIS_URL empty; running cache-less")
@@ -57,15 +49,10 @@ func (c *Cache) Close() {
 	_ = c.rdb.Close()
 }
 
-// slugKey is keyed by (product, slug), not slug alone: tenant slugs are
-// unique only per product, so a bare-slug key would cross-serve a `drs`
-// tenant's slim record to a `health` request that reused the same slug
-// (or vice versa) for the 30s TTL. The product segment keeps the two
-// namespaces from poisoning each other.
+// slugKey scopes the key by product namespace and slug.
 func slugKey(product, slug string) string { return "tenant:slug:" + product + ":" + slug }
 
-// GetSlug returns the cached slim-tenant JSON for a (product, slug), or
-// (nil, false) on miss / cache-less operation.
+// GetSlug returns the cached slim-tenant JSON for a (product, slug), or (nil, false).
 func (c *Cache) GetSlug(ctx context.Context, product, slug string) ([]byte, bool) {
 	if c == nil || c.rdb == nil {
 		return nil, false
@@ -77,7 +64,7 @@ func (c *Cache) GetSlug(ctx context.Context, product, slug string) ([]byte, bool
 	return b, true
 }
 
-// SetSlug stores the slim-tenant JSON with the 30s TTL. Best effort.
+// SetSlug stores the slim-tenant JSON with a 30-second TTL.
 func (c *Cache) SetSlug(ctx context.Context, product, slug string, body []byte) {
 	if c == nil || c.rdb == nil {
 		return
@@ -87,8 +74,7 @@ func (c *Cache) SetSlug(ctx context.Context, product, slug string, body []byte) 
 	}
 }
 
-// InvalidateSlug drops the cached entry. Shared Redis means one DEL
-// serves every replica.
+// InvalidateSlug removes the cached entry for all replicas.
 func (c *Cache) InvalidateSlug(ctx context.Context, product, slug string) {
 	if c == nil || c.rdb == nil {
 		return
@@ -98,8 +84,7 @@ func (c *Cache) InvalidateSlug(ctx context.Context, product, slug string) {
 	}
 }
 
-// GetIdempotent returns a previously stored success response for an
-// Idempotency-Key, or (nil, false).
+// GetIdempotent returns a previously stored response for an Idempotency-Key.
 func (c *Cache) GetIdempotent(ctx context.Context, key string) ([]byte, bool) {
 	if c == nil || c.rdb == nil {
 		return nil, false
@@ -111,9 +96,7 @@ func (c *Cache) GetIdempotent(ctx context.Context, key string) ([]byte, bool) {
 	return b, true
 }
 
-// StoreIdempotent stores a success response under the Idempotency-Key
-// with SET NX EX 86400. Best effort: a lost write just means the
-// retry re-executes, which the slug uniqueness guard already absorbs.
+// StoreIdempotent stores a success response under the Idempotency-Key.
 func (c *Cache) StoreIdempotent(ctx context.Context, key string, body []byte) {
 	if c == nil || c.rdb == nil {
 		return

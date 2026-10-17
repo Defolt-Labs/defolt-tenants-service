@@ -12,13 +12,7 @@ type Config struct {
 	ServiceName    string
 	ServiceVersion string
 	Environment    string
-	// PublicRootDomain is the DNS root every customer-facing host hangs
-	// off: `uat.defoltlabs.com` on cstaging, `defoltlabs.com` in
-	// production. Per-product host SHAPES live in service.ProductHome;
-	// this is only the root they share.
-	//
-	// It REPLACES TENANT_BASE_DOMAIN, which the chart set to
-	// `mt.drs.uat.defoltlabs.com` and which no Go code ever read.
+	// PublicRootDomain is the shared DNS root for customer-facing hosts.
 	PublicRootDomain string
 	ServerPort       string
 
@@ -30,22 +24,17 @@ type Config struct {
 	InternalServiceKey string
 	AutoMigrate        bool
 
-	// Redis lookup cache for resolve-host (30s TTL). When empty the
-	// service falls through to Postgres for every request.
+	// RedisURL configures lookup cache for resolve-host.
 	RedisURL string
 
-	// Reserved slugs — the tenants-service refuses to allocate these.
-	// Comma-separated env value; defaults cover the fleet's public
-	// subdomains (www, api, admin, staff, ci, grafana, docs).
+	// ReservedSlugs holds slugs refused for tenant allocation.
 	ReservedSlugs []string
 
-	// Public signup wiring.
 	TurnstileSecret string
 	IdentityURL     string
 	DefaultPlatform string
 
-	// BillingURL points at defolt-billing-service for the internal
-	// registration-checkout call (§5.11).
+	// BillingURL points at defolt-billing-service for registration checkout calls.
 	BillingURL string
 }
 
@@ -89,14 +78,7 @@ func Load() (*Config, error) {
 		MaxIdleConns:    getInt("DB_MAX_IDLE_CONNS", 3),
 		ConnMaxLifetime: time.Duration(getInt("DB_CONN_MAX_LIFETIME_MIN", 15)) * time.Minute,
 
-		NatsURL: getStr("NATS_URL", "nats://defolt-nats:4222"),
-		// Falls back to the cluster-wide INTERNAL_SERVICE_KEY already in
-		// platform-env; billing and identity verify against that same value.
-		// INTERNAL_SERVICE_KEYS is WP-SEC4 H1's named set — "platform=<k>,dhs=<k>,drs=<k>"
-		// — so each namespace holds its own key and a compromised pod yields one of
-		// them instead of every internal route fleet-wide. It falls back to the single
-		// INTERNAL_SERVICE_KEY, which is still accepted, so the rollover is one
-		// namespace at a time rather than a flag day.
+		NatsURL:            getStr("NATS_URL", "nats://defolt-nats:4222"),
 		InternalServiceKey: getStr("INTERNAL_SERVICE_KEYS", getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", ""))),
 		AutoMigrate:        getBool("AUTO_MIGRATE", true),
 

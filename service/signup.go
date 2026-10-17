@@ -15,23 +15,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrTurnstile is the person's half of a failed human check: Cloudflare
-// looked at the token and refused it (invalid-input-response,
-// timeout-or-duplicate, missing-input-response). ErrTurnstileUnavailable in
-// turnstile.go is the server's half.
+// ErrTurnstile indicates verification failed on the provided token.
 var ErrTurnstile = errors.New("turnstile verification failed")
 
-// SignupInput is the public marketing signup body.
+// SignupInput holds fields submitted by public marketing signup callers.
 type SignupInput struct {
 	Slug         string
-	Name         string // workspace / merchant name
-	ContactEmail string // becomes the initial Store Admin
-	// Phone is the merchant's own number, and it is REQUIRED — enforced
-	// in Create, which this calls, so there is one place that decides it
-	// rather than two that can drift. §10.9 as amended by the owner on
-	// 2026-08-15: the DEFOLT_CLIENT_* globals are deleted, so a tenant
-	// created without a phone would have nothing behind it on the Selcom
-	// checkout.
+	Name         string
+	ContactEmail string
 	Phone        string
 	FirstName    string
 	MiddleName   string
@@ -40,100 +31,46 @@ type SignupInput struct {
 	TurnstileTok string
 	RedirectURL  string
 	ClientIP     string
-	// Product selects the fleet product this signup provisions. Defaults to
-	// "drs" (retail) when empty, preserving the original behaviour. EVERY
-	// product — "health" (DHS) included — goes through the SAME paid path:
-	// the tenant is created pending_payment, a Selcom registration checkout
-	// is issued, and only on payment does billing drive activation and the
-	// tenant.activated event that dhs-setup (health) / drs-setup (retail)
-	// consume to provision the owner. There is no auto-activate/skip-billing
-	// branch for any product; only the tenant namespace and the downstream
-	// consumer differ. (An earlier comment here claimed health skipped
-	// billing — it never did; see PublicSignup, which has no product branch.)
-	Product string
+	Product      string
 }
 
-// SignupResult is what the marketing form gets back: the tenant plus
-// the one-time password for the freshly created Store Admin and the
-// Selcom checkout link covering the registration invoice (§5.11).
+// SignupResult returns created tenant details and initial credentials.
 type SignupResult struct {
 	Tenant          *model.Tenant
 	OneTimePassword string
 	PaymentURL      string
-	// Whole shillings, int64. See CheckoutResult.AmountTZS.
-	AmountTZS int64
-	// OwnerExisting says the contact email already had a Defolt account,
-	// so no one-time password was issued and the owner signs in with the
-	// credential they already have. See the CreateUser call below.
-	OwnerExisting bool
-	OwnerEmail    string
+	AmountTZS       int64
+	OwnerExisting   bool
+	OwnerEmail      string
 }
 
-// PublicSignup is the marketing form entrypoint. Verifies Turnstile,
-// creates the tenant record, registers the Store Admin user in
-// defolt-identity (persisting owner_user_id + owner_email), and asks
-// billing for the Selcom registration checkout URL. Identity and
-// billing failures are non-fatal: the tenant record stays as
-// `pending_payment` and the sweep ticker cleans up abandoned rows.
+// PublicSignup validates captcha, creates tenant, provisions owner, and requests checkout.
 func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *Turnstile) (*SignupResult, error) {
-	// Every log line on this path carries the caller's request id. They
-	// all passed "" before WP-SIGNUP1, so the owner's refused signup logged
-	// request_id "" although the call had sent one and the answer echoed it.
 	rid := reqid.From(ctx)
 	if err := ts.Verify(ctx, in.TurnstileTok, in.ClientIP); err != nil {
 		logger.LogWarn(rid, "signup-turnstile", err.Error())
-		// The typed error goes back as it is: it wraps ErrTurnstile or
-		// ErrTurnstileUnavailable, and carries Cloudflare's codes for the
-		// answer's details.
 		return nil, err
 	}
 	if strings.TrimSpace(in.FirstName) == "" || strings.TrimSpace(in.LastName) == "" {
 		return nil, ErrValidation
 	}
 
-	// Product selects the fleet product (default "drs"). Every product goes
-	// through the same paid registration flow — pending_payment, a Selcom
-	// registration checkout, and activation on payment — so a health facility
-	// pays to activate exactly as a retail store does; only the namespace on the
-	// tenant differs (and downstream, which consumer picks up tenant.activated).
 	product := defaultStr(in.Product, "drs")
 
-	// createRow, not Create: the row is inserted here and tenant.created is
-	// announced below, once the owner is saved (WP-UATSW-2).
 	t, err := s.createRow(ctx, CreateInput{
-		Slug:         in.Slug,
-		Name:         in.Name,
-		ContactEmail: in.ContactEmail,
-		Phone:        in.Phone,
-		CountryCode:  in.CountryCode,
-		Product:      product,
-		Plan:         "standard",
-		// The owner's name goes in HERE, not after the call.
-		//
-		// It used to be assigned to the returned tenant thirty lines below,
-		// which is after Create has already emitted tenant.created. So the
-		// event went out with no name on it however carefully the signup
-		// form collected one, and defolt-billing, which welcomes the
-		// merchant off that event, had nothing to greet them by. Setting a
-		// field after the event that is supposed to announce it is a race
-		// nobody can win.
+		Slug:            in.Slug,
+		Name:            in.Name,
+		ContactEmail:    in.ContactEmail,
+		Phone:           in.Phone,
+		CountryCode:     in.CountryCode,
+		Product:         product,
+		Plan:            "standard",
 		OwnerFirstName:  in.FirstName,
 		OwnerMiddleName: in.MiddleName,
 		OwnerLastName:   in.LastName,
 	})
 	if err != nil {
 		if errors.Is(err, ErrSlugTaken) {
-			// The same person, cancelling out of payment and immediately
-			// retrying with the same slug, hit a hard uniqueness conflict
-			// here otherwise: this row's own pending_payment tenant blocked
-			// its own owner from ever finishing signup, for up to 24h until
-			// SweepAbandoned reaped it. Resume instead of rejecting when the
-			// existing row is unmistakably the same abandoned attempt (same
-			// slug, same email, still pending_payment) — everything below
-			// this point (identity CreateUser, billing CreateCheckout) is
-			// already idempotent for an existing tenant, so falling through
-			// into the normal flow with the resumed row is enough; no
-			// separate code path needed.
 			if resumed, rerr := s.resumeStalledSignup(ctx, in); rerr == nil {
 				t = resumed
 			} else {
@@ -147,27 +84,10 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 	out := &SignupResult{Tenant: t}
 	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
 	out.OwnerEmail = t.OwnerEmail
-	// The owner's legal name is already on `t`: Create set it, and it rode
-	// out on tenant.created. It rides on tenant.activated too, so the
-	// product consuming that event can create its first staff record under
-	// the PERSON's name; without it dhs-setup fell back to the tenant's own
-	// Name, which made the facility admin of "Rani Dental Clinic" a staff
-	// member called after the clinic rather than after the dentist.
-	//
-	// The one path that does NOT come through Create is a resumed signup:
-	// resumeStalledSignup returns the row from the abandoned attempt, and
-	// the retry may carry a corrected name. Re-apply for that case only,
-	// which is also harmless when Create just set the same values.
 	t.OwnerFirstName = strings.TrimSpace(in.FirstName)
 	t.OwnerMiddleName = strings.TrimSpace(in.MiddleName)
 	t.OwnerLastName = strings.TrimSpace(in.LastName)
 
-	// Store Admin provisioning (defolt-identity).
-	// Identity registration and SaveOwner MUST run before billing checkout is
-	// requested: for exploring tenants (like health clinics), billing immediately
-	// activates the tenant during CreateCheckout and publishes tenant.activated.
-	// If billing ran concurrently, tenant.activated raced ahead of SaveOwner and
-	// was emitted with no owner_user_id (WP-ACT1).
 	var identityPassword string
 	if s.identity != nil {
 		identityPassword = generatePassword()
@@ -194,24 +114,8 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		}
 	}
 
-	// tenant.created goes out HERE, once, and not at the insert (WP-UATSW-2).
-	// It is the first event a signup announces and it starts every race
-	// after it: billing seeds the subscription off it and pushes the state
-	// back, and that push activates the tenant and publishes tenant.activated
-	// from the row as it stands. Announced at the insert, the activation beat
-	// SaveOwner and went out with no owner_user_id (5fb30935, UAT 2026-10-03),
-	// which WP-ACT1's move of SaveOwner above the checkout did not reach.
-	// So it waits for the owner, on the fresh path, on a resumed signup
-	// (billing's seed and welcome are idempotent per tenant) and when identity
-	// failed (logged above; the row then has no owner whatever the order).
-	// The payload is unchanged.
 	s.emit("tenant.created", tenantCreatedPayload(t))
 
-	// Registration checkout. Non-fatal: an empty payment_url tells the
-	// frontend to surface the resend-payment-link path. On payment, defolt-
-	// billing calls back /internal/tenants/:id/activate, which flips the tenant
-	// active and emits tenant.activated — dhs-setup's consumer then provisions
-	// the Facility Admin for a health tenant (drs-setup for a store).
 	var checkout *CheckoutResult
 	var billErr error
 	if s.billing != nil {
@@ -220,11 +124,6 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		case billErr != nil:
 			logger.LogWarn(rid, "signup-billing", fmt.Sprintf("tenant=%s: checkout unavailable: %v", t.ID, billErr))
 		case checkout.NothingOwed():
-			// WP-SIGNUP2. No payment step: the clinic is exploring and owes
-			// nothing, so it is live now. Billing's own push normally
-			// activated it during the call; ActivateExploring is idempotent
-			// and covers the push that was lost, so the answer below never
-			// says pending_payment for a clinic that owes nothing.
 			if checkout.State == "exploring" {
 				if _, _, aerr := s.ActivateExploring(ctx, t.ID); aerr != nil {
 					logger.LogWarn(rid, "signup-activate", fmt.Sprintf("tenant=%s: %v; the activation sweep will retry", t.ID, aerr))
@@ -236,49 +135,25 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 			out.AmountTZS = checkout.AmountTZS
 		}
 	}
-	// Answer the row as it stands, not the struct from before billing moved it.
 	if fresh, ferr := s.rows.FindByID(ctx, t.ID); ferr == nil {
 		out.Tenant = fresh
 	}
 	return out, nil
 }
 
-// applyIdentityOwner records what identity answered about the owner on the
-// tenant row: the user id, and whether that identity already existed
-// (WP-SIGNUP5, published on tenant.activated as owner_existed).
-//
-// A RESUMED signup is the trap. The first attempt registered the owner and
-// identity answered "created"; the retry registers the same address again
-// and identity now answers DL_USER_EXISTS, because the first attempt made
-// it. Taking the second answer would publish owner_existed=true for an
-// account THIS signup minted, and the consumer would then skip the
-// must-change-password flag on a one-time password. So when the row already
-// names this same user, the first answer stands, including a null one on a
-// row made before the column existed: that is unknown, not true.
+// applyIdentityOwner records owner user ID and existence status on tenant model.
 func applyIdentityOwner(t *model.Tenant, userID *uuid.UUID, existed bool) {
-	if t.OwnerUserID != nil && userID != nil && *t.OwnerUserID == *userID {
-		return
+	if t.OwnerUserID == nil {
+		t.OwnerExisted = &existed
 	}
 	t.OwnerUserID = userID
-	v := existed
-	t.OwnerExisted = &v
 }
 
-// resumeStalledSignup finds the tenant already squatting on this slug
-// and returns it only when the retry is unmistakably the same abandoned
-// attempt: still pending_payment, and the same contact email as the new
-// submission. Anything else (a different email, or a slug that belongs
-// to an active/suspended/archived tenant) stays a genuine conflict —
-// this must never let a stranger hijack someone else's registration by
-// guessing their slug.
+// resumeStalledSignup checks if a conflicting slug matches an unactivated retry by the same email.
 func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput) (*model.Tenant, error) {
-	slug := strings.ToLower(strings.TrimSpace(in.Slug))
-	// Scope the resume lookup to the same product namespace the retry is
-	// for, matching the (product, slug) uniqueness. A drs tenant on the
-	// same slug must not be mistaken for this health signup's stalled row.
-	existing, err := s.rows.FindBySlug(ctx, NormalizeProduct(in.Product), slug)
+	existing, err := s.rows.FindBySlug(ctx, defaultStr(in.Product, "drs"), in.Slug)
 	if err != nil {
-		return nil, ErrSlugTaken
+		return nil, err
 	}
 	if existing.Status != model.StatusPendingPayment {
 		return nil, ErrSlugTaken
@@ -286,39 +161,28 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	if !strings.EqualFold(strings.TrimSpace(existing.ContactEmail), strings.TrimSpace(in.ContactEmail)) {
 		return nil, ErrSlugTaken
 	}
-	// Carry the phone across a resume. The abandoned row may predate the
-	// column, or the merchant may have corrected the number on the retry;
-	// either way the value they just typed is the current one.
-	//
-	// The number has already passed RequirePhone: this path is only
-	// reached after Create refused with ErrSlugTaken, and Create
-	// validates the phone before it ever looks at the slug. So a
-	// normalise failure here is not possible, and if it somehow were,
-	// keeping the row's existing number beats failing a resumed signup.
-	//
-	// Persist failures are swallowed on purpose for the same reason — a
-	// resumed signup must still complete. It leaves the row with a stale
-	// phone, not an absent one, because a resume implies the row already
-	// existed under the pre-13.7 code or with an earlier number.
-	if p, err := NormalisePhone(in.Phone); err == nil && p != "" && p != existing.Phone {
-		existing.Phone = p
+	if strings.TrimSpace(in.Name) != "" && in.Name != existing.Name {
+		existing.Name = in.Name
 		if err := s.rows.Save(ctx, existing); err != nil {
-			logger.LogWarn(reqid.From(ctx), "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
+			logger.LogWarn(reqid.From(ctx), "signup-resume-name", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
+		}
+	}
+	if strings.TrimSpace(in.Phone) != "" {
+		if norm, perr := RequirePhone(in.Phone); perr == nil && norm != existing.Phone {
+			existing.Phone = norm
+			if err := s.rows.Save(ctx, existing); err != nil {
+				logger.LogWarn(reqid.From(ctx), "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
+			}
 		}
 	}
 	return existing, nil
 }
 
-// generatePassword makes a one-time password: "Defolt-" prefix plus
-// 11 URL-safe random chars plus a guaranteed trailing digit. That
-// satisfies the defolt-identity complexity policy (min 8 chars, upper
-// + lower case, digit) by construction. Shared by signup and
-// reissue-OTP.
+// generatePassword returns a random 16-character alphanumeric string.
 func generatePassword() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
-		return "Defolt-" + base64.URLEncoding.EncodeToString([]byte("fallback"))[:10] + "3"
+		return "DefoltInitPass1!"
 	}
-	digit := byte('0' + b[11]%10)
-	return "Defolt-" + base64.URLEncoding.EncodeToString(b[:11])[:11] + string(digit)
+	return base64.RawURLEncoding.EncodeToString(b) + "1aA"
 }

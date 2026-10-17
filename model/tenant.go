@@ -7,15 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// TenantStatus tracks the lifecycle of a tenant. Traefik forward auth
-// treats each state distinctly (see MULTI_TENANT_PLAN.md §5.3):
-//
-//   - pending_payment: registration invoice unpaid; block SPA except
-//     billing endpoints.
-//   - active: normal operation.
-//   - suspended: manually or auto-suspended; block writes except
-//     billing (self-reactivate).
-//   - archived: terminal; block everything.
+// TenantStatus tracks the lifecycle of a tenant row.
 type TenantStatus string
 
 const (
@@ -26,127 +18,34 @@ const (
 	StatusArchived       TenantStatus = "archived"
 )
 
-// Tenant is the fleet-shared tenant registry row. One row per
-// merchant. Slug is the routing key baked into the subdomain
-// `<slug>.drs.defoltlabs.com`; it is enforced 3-32 chars, lowercase
-// alnum + hyphens at the API layer.
-//
-// Plan (Phase 4 dropped `region`): everything runs in a single k3s
-// cluster, so no per-region column.
+// Tenant represents a registered tenant organization in the fleet registry.
 type Tenant struct {
-	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	// Slug is unique per PRODUCT, not globally — see the composite
-	// index on Product below. `jamii.drs.defoltlabs.com` and
-	// `jamii.afya.defoltlabs.com` never collide in DNS, so the database
-	// had no business refusing the second tenant.
-	Slug         string `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
-	Name         string `gorm:"size:120;not null" json:"name"`
-	ContactEmail string `gorm:"size:180;not null" json:"contact_email"`
-	// Phone is the merchant's own number, normalised to E.164 by
-	// service.NormalisePhone. Added for §10.9: defolt-billing puts it on
-	// the Selcom checkout as `buyer_phone`, because the buyer on a
-	// subscription payment is the merchant paying it, not Defolt Labs.
-	//
-	// **Required at the service layer, nullable in the column.** Those
-	// are not in tension — they are two different points in time. Every
-	// tenant created from 2026-08-15 must supply one (service.Create
-	// refuses otherwise); the column stays nullable because a NOT NULL
-	// added by AutoMigrate over pre-existing rows is a migration failure,
-	// and AutoMigrate is non-fatal by fleet convention, so it would fail
-	// silently and leave the column absent altogether.
-	//
-	// Historic rows were backfilled — see the §12.2 entry for row 13.7.
-	// If one is somehow still empty, billing sends an empty buyer_phone
-	// rather than substituting Defolt's number: wrong data on a
-	// merchant's payment record is worse than absent data, and the
-	// checkout must complete either way (§0.2 rule 3).
-	Phone       string `gorm:"size:32" json:"phone,omitempty"`
-	Currency    string `gorm:"size:8;default:'TZS'" json:"currency"`
-	Timezone    string `gorm:"size:64;default:'Africa/Dar_es_Salaam'" json:"timezone"`
-	CountryCode string `gorm:"size:2;default:'TZ'" json:"country_code"`
-	// Product identifies which vertical the tenant belongs to (drs,
-	// nyaraka, vinono). Multi-product signup is a Phase 3+ decision
-	// (§4.3) — for Phase 1 a tenant is single-product.
-	// Leads the (product, slug) unique index. Priority 1 so the index is
-	// also usable on its own for product-scoped listing, which is why the
-	// standalone `index` tag is gone: it would be a redundant prefix.
-	Product string `gorm:"size:32;default:'drs';uniqueIndex:ux_tenants_product_slug,priority:1" json:"product"`
-	// Plan is the single flat plan slug per §8.2 (`standard`). Kept
-	// as a string column so a future tiered offering can extend it
-	// without a migration.
-	Plan   string       `gorm:"size:32;default:'standard'" json:"plan"`
-	Status TenantStatus `gorm:"size:32;default:'pending_payment';index" json:"status"`
-
-	// OwnerUserID / OwnerEmail identify the initial Store Admin created
-	// in defolt-identity during public signup (§5.11). OwnerUserID is
-	// nullable: rows created before this column existed, and signups
-	// where the identity call failed, leave it nil. The reissue-OTP
-	// endpoint backfills it lazily via identity's by-email lookup.
-	OwnerUserID *uuid.UUID `gorm:"type:uuid" json:"owner_user_id,omitempty"`
-	OwnerEmail  string     `gorm:"size:180" json:"owner_email,omitempty"`
-
-	// The owner's legal name, kept as three parts rather than one string.
-	// Health is a KYC and audit setting: a clinical record's actor has to be a
-	// named person, and "split the first whitespace token off" is a guess that
-	// turns "Dr. Rachel Mhaville" into a first name of "Dr.". Middle name is
-	// optional because not everyone has one; first and last are not.
-	//
-	// These ride on tenant.activated so the product that consumes it can create
-	// its staff mirror under the PERSON's name. dhs-setup previously fell back to
-	// the tenant's own Name for that, which made the facility admin of "Rani
-	// Dental Clinic" a staff member called "Rani Dental Clinic".
-	OwnerFirstName  string `gorm:"size:80" json:"owner_first_name,omitempty"`
-	OwnerMiddleName string `gorm:"size:80" json:"owner_middle_name,omitempty"`
-	OwnerLastName   string `gorm:"size:80" json:"owner_last_name,omitempty"`
-
-	// OwnerExisted records whether the owner's identity existed BEFORE this
-	// tenant was made (WP-SIGNUP5). It rides on tenant.activated as
-	// `owner_existed`, so the consuming product can tell an owner who already
-	// holds a password they chose (a DRS shop owner opening a clinic) from one
-	// whose only credential is the one-time password this signup minted.
-	//
-	// It is PERSISTED because the event is not published by the request that
-	// learned the answer: identity answers during PublicSignup, and
-	// tenant.activated goes out later, from billing's activate callback, the
-	// subscription sync or the exploring sweep, each of which reads this row.
-	//
-	// Nullable on purpose. Null is "not known": every row made before the
-	// column, and an ownerless tenant. The event reads null as false, which is
-	// exactly what the consumer assumed before the field existed, so an
-	// unknown never switches a must-change-password flag OFF. Not on the read
-	// shape (json "-"): the event is the only contract this row asked for.
-	OwnerExisted *bool `gorm:"column:owner_existed" json:"-"`
-
-	// ActivatedAt is the moment this tenant became usable — the moment
-	// `tenant.activated` went out and its product provisioned it.
-	//
-	// It is not the same fact as `status = active`, which is a CURRENT
-	// state that a suspension and a restore both rewrite. WP-B16 needs
-	// the moment, not the state: the sweep that activates an exploring
-	// tenant must be able to say, idempotently, whether this tenant has
-	// ever been announced to its product, and a tenant that was
-	// activated, suspended for non-payment and restored must not be
-	// announced a second time.
-	//
-	// Nullable, and null for every row created before the column: that
-	// is honest rather than convenient. Nothing derives access from it.
-	ActivatedAt *time.Time `json:"activated_at,omitempty"`
-
-	// TrialStartsAt / TrialEndsAt bracket the 7-day free window that
-	// unlocks on registration-payment confirmation. Filled in by the
-	// billing consumer's `tenant.activated` handler.
-	TrialStartsAt *time.Time `json:"trial_starts_at,omitempty"`
-	TrialEndsAt   *time.Time `json:"trial_ends_at,omitempty"`
-
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	ID              uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	Slug            string         `gorm:"size:32;uniqueIndex:ux_tenants_product_slug,priority:2;not null" json:"slug"`
+	Name            string         `gorm:"size:120;not null" json:"name"`
+	ContactEmail    string         `gorm:"size:180;not null" json:"contact_email"`
+	Phone           string         `gorm:"size:32" json:"phone,omitempty"`
+	Currency        string         `gorm:"size:8;default:'TZS'" json:"currency"`
+	Timezone        string         `gorm:"size:64;default:'Africa/Dar_es_Salaam'" json:"timezone"`
+	CountryCode     string         `gorm:"size:2;default:'TZ'" json:"country_code"`
+	Product         string         `gorm:"size:32;default:'drs';uniqueIndex:ux_tenants_product_slug,priority:1" json:"product"`
+	Plan            string         `gorm:"size:32;default:'standard'" json:"plan"`
+	Status          TenantStatus   `gorm:"size:32;default:'pending_payment';index" json:"status"`
+	OwnerUserID     *uuid.UUID     `gorm:"type:uuid" json:"owner_user_id,omitempty"`
+	OwnerEmail      string         `gorm:"size:180" json:"owner_email,omitempty"`
+	OwnerFirstName  string         `gorm:"size:80" json:"owner_first_name,omitempty"`
+	OwnerMiddleName string         `gorm:"size:80" json:"owner_middle_name,omitempty"`
+	OwnerLastName   string         `gorm:"size:80" json:"owner_last_name,omitempty"`
+	OwnerExisted    *bool          `gorm:"column:owner_existed" json:"-"`
+	ActivatedAt     *time.Time     `json:"activated_at,omitempty"`
+	TrialStartsAt   *time.Time     `json:"trial_starts_at,omitempty"`
+	TrialEndsAt     *time.Time     `json:"trial_ends_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
-// TenantSlim is the public projection of a tenant: exactly the fields
-// the anonymous by-slug lookup and Traefik forward auth need, nothing
-// else (no contact email, no timestamps). This is also the shape
-// cached in Redis under `tenant:slug:<slug>`.
+// TenantSlim is the public projection of a tenant for lookup and auth.
 type TenantSlim struct {
 	ID      uuid.UUID    `json:"id"`
 	Slug    string       `json:"slug"`
