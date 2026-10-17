@@ -26,8 +26,7 @@ a tenant. It knows nothing about shelves or patients. Go, Gin, GORM on Postgres,
 | `middleware/` | internal service key, CORS, request id, tenant headers |
 | `cache/` | Redis slug cache and idempotency keys |
 | `response/` | the response envelope, success and failure writers, codes |
-| `platformguard/` | exemption lists for the product-vocabulary guard test |
-| `testkit/` | shared test helpers |
+| `testkit/` | shared test helpers and the product-vocabulary guard |
 | `values.yaml` | Helm values for UAT |
 
 ## Run locally

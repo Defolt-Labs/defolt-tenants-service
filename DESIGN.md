@@ -44,7 +44,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 ## The gate
 - `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -count=1`.
 - `python3 office/tools/check-endpoints.py <repo>` prints PASS.
-- platformguard fails the build when a type, field or function names a product-owned concept.
+- The testkit coupling test fails the build when a type, field or function names a product-owned concept.
 
 ## Invariants
 - A tenant row is never hard-deleted except an abandoned unpaid signup.
