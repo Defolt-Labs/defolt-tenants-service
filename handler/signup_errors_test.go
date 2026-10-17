@@ -46,7 +46,7 @@ func signupRoute(ts *service.Turnstile) *gin.Engine {
 	h := New(svc, ts, nil, "test")
 	r := gin.New()
 	r.Use(middleware.RequestID())
-	r.POST("/api/v1/public/signup", h.PublicSignup)
+	r.POST("/tenants/v1/public/signup", h.PublicSignup)
 	return r
 }
 
@@ -61,7 +61,7 @@ func goodSignup() map[string]any {
 
 func postSignup(t *testing.T, r *gin.Engine, raw []byte) (int, signupAnswer, http.Header) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/public/signup", bytes.NewReader(raw))
+	req := httptest.NewRequest(http.MethodPost, "/tenants/v1/public/signup", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(middleware.RequestIDHeader, signupRID)
 	w := httptest.NewRecorder()

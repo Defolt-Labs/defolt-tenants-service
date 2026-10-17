@@ -6,14 +6,14 @@ import "defolt-tenants-service/middleware"
 func RegisterInternal(c Config) {
 	h := c.Handlers
 
-	internal := c.Engine.Group("/api/v1", middleware.InternalServiceKey(c.Config.InternalServiceKey))
+	internal := c.Engine.Group("", middleware.InternalServiceKey(c.Config.InternalServiceKey))
 	{
-		internal.POST("/internal/tenants/:id/activate", h.Activate)
-		internal.PUT("/internal/tenants/:id/subscription-state", h.SyncSubscriptionState)
-		internal.POST("/internal/sweep-exploring", h.SweepExploring)
+		internal.POST("/tenants/v1/internal/tenants/:id/activate", h.Activate)
+		internal.PUT("/tenants/v1/internal/tenants/:id/subscription-state", h.SyncSubscriptionState)
+		internal.POST("/tenants/v1/internal/sweep-exploring", h.SweepExploring)
 	}
 
 	// Public on purpose: only Traefik calls it and the network policy blocks anyone else.
-	c.Engine.POST("/internal/resolve-host", h.ResolveHost)
-	c.Engine.GET("/internal/resolve-host", h.ResolveHost)
+	c.Engine.POST("/tenants/v1/internal/resolve-host", h.ResolveHost)
+	c.Engine.GET("/tenants/v1/internal/resolve-host", h.ResolveHost)
 }
