@@ -51,7 +51,7 @@ func newCreateRoute() *gin.Engine {
 	h := New(svc, nil, nil, "test")
 	r := gin.New()
 	r.Use(middleware.RequestID())
-	r.POST("/api/v1/tenants", h.Create)
+	r.POST("/tenants/v1", h.Create)
 	return r
 }
 
@@ -61,7 +61,7 @@ func postCreate(t *testing.T, body map[string]any) (int, map[string]any) {
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tenants", bytes.NewReader(raw))
+	req := httptest.NewRequest(http.MethodPost, "/tenants/v1", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(middleware.RequestIDHeader, "req-0f1e2d3c-4b5a-6978")
 	w := httptest.NewRecorder()

@@ -24,7 +24,7 @@ Rules shared by every route, stated once:
 - Saves: nothing.
 - Refuses: nothing.
 
-### GET /api/v1/tenants/by-slug/:slug
+### GET /tenants/v1/by-slug/:slug
 - Handler: GetBySlug
 - Who may call: anyone, no key. Public lookup, rate limited at Traefik.
 - In: `slug` in the path; product from the `product` query or the `X-Defolt-Product` header, default drs.
@@ -32,7 +32,7 @@ Rules shared by every route, stated once:
 - Saves: nothing.
 - Refuses: 404 `DL_TENANT_UNKNOWN`.
 
-### POST /api/v1/public/signup
+### POST /tenants/v1/public/signup
 - Handler: PublicSignup
 - Who may call: anyone, no key. A Turnstile check guards it.
 - In: slug, name, contact_email, phone, first_name, last_name (all required, not blank); middle_name, country_code, turnstile_token, redirect_url, product optional. Optional `Idempotency-Key` header replays the first answer.
@@ -40,7 +40,7 @@ Rules shared by every route, stated once:
 - Saves: a pending_payment tenant, the owner in identity, a billing checkout; announces `tenant.created`. A stalled earlier signup for the same email resumes.
 - Refuses: 400 `DL_SIGNUP_FIELD_REQUIRED`, `DL_SIGNUP_EMAIL_INVALID`, `DL_SIGNUP_BODY_UNREADABLE`, `DL_SIGNUP_PHONE_INVALID`, `DL_SIGNUP_PHONE_COUNTRY_UNCLEAR`, `DL_TENANT_SLUG_INVALID`; 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`; 409 `DL_TENANT_SLUG_RESERVED`, `DL_TENANT_SLUG_TAKEN`; 503 `DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE`.
 
-### POST /api/v1/tenants
+### POST /tenants/v1
 - Handler: Create
 - Who may call: internal key.
 - In: slug, name, contact_email, phone required; currency, timezone, country_code, product, plan, owner_user_id, owner_email, owner names optional. The health product requires owner_user_id. Optional `Idempotency-Key`.
@@ -48,7 +48,7 @@ Rules shared by every route, stated once:
 - Saves: the tenant; announces `tenant.created`.
 - Refuses: 400 `DL_VALIDATION_FAILED`, `DL_TENANT_OWNER_REQUIRED`; 409 `DL_TENANT_SLUG_RESERVED`, `DL_TENANT_SLUG_TAKEN`.
 
-### GET /api/v1/tenants/:id
+### GET /tenants/v1/:id
 - Handler: Get
 - Who may call: internal key.
 - In: `id` in the path.
@@ -56,7 +56,7 @@ Rules shared by every route, stated once:
 - Saves: nothing.
 - Refuses: 404.
 
-### PATCH /api/v1/tenants/:id
+### PATCH /tenants/v1/:id
 - Handler: Patch
 - Who may call: internal key.
 - In: any of name, contact_email, phone, plan.
@@ -64,7 +64,7 @@ Rules shared by every route, stated once:
 - Saves: the changed fields; announces `tenant.updated`.
 - Refuses: 400 `DL_VALIDATION_FAILED`; 404.
 
-### POST /api/v1/tenants/:id/suspend
+### POST /tenants/v1/:id/suspend
 - Handler: Suspend
 - Who may call: internal key.
 - In: `id` in the path.
@@ -72,7 +72,7 @@ Rules shared by every route, stated once:
 - Saves: status suspended; clears the slug cache; announces `tenant.status_changed` and `tenant.suspended`.
 - Refuses: 404.
 
-### POST /api/v1/tenants/:id/restore
+### POST /tenants/v1/:id/restore
 - Handler: Restore
 - Who may call: internal key.
 - In: `id` in the path.
@@ -80,7 +80,7 @@ Rules shared by every route, stated once:
 - Saves: status active; clears the slug cache; announces `tenant.status_changed` and `tenant.restored`.
 - Refuses: 404.
 
-### POST /api/v1/tenants/:id/reissue-owner-otp
+### POST /tenants/v1/:id/reissue-owner-otp
 - Handler: ReissueOwnerOTP
 - Who may call: internal key.
 - In: `id` in the path.
@@ -88,7 +88,7 @@ Rules shared by every route, stated once:
 - Saves: a new owner password in identity.
 - Refuses: 404; 409 `DL_TENANT_NO_OWNER`.
 
-### POST /api/v1/tenants/:id/resend-payment-link
+### POST /tenants/v1/:id/resend-payment-link
 - Handler: ResendPaymentLink
 - Who may call: internal key.
 - In: `id` in the path.
@@ -96,7 +96,7 @@ Rules shared by every route, stated once:
 - Saves: a fresh checkout in billing.
 - Refuses: 404; 503 `DL_BILLING_UNAVAILABLE`.
 
-### GET /api/v1/tenants/pending-checkout
+### GET /tenants/v1/pending-checkout
 - Handler: PendingCheckoutByEmail
 - Who may call: internal key.
 - In: `email` query required, `product` query optional.
@@ -104,7 +104,7 @@ Rules shared by every route, stated once:
 - Saves: nothing.
 - Refuses: 400 `DL_VALIDATION_FAILED`; 404; 503 `DL_BILLING_UNAVAILABLE`.
 
-### GET /api/v1/tenants/:id/health
+### GET /tenants/v1/:id/health
 - Handler: TenantHealth
 - Who may call: internal key.
 - In: `id` in the path.
@@ -112,7 +112,7 @@ Rules shared by every route, stated once:
 - Saves: nothing.
 - Refuses: 404.
 
-### POST /api/v1/internal/tenants/:id/activate
+### POST /tenants/v1/internal/tenants/:id/activate
 - Handler: Activate
 - Who may call: internal key (billing after payment).
 - In: `id` in the path.
@@ -120,7 +120,7 @@ Rules shared by every route, stated once:
 - Saves: status active, a 7 day trial, activated_at; announces `tenant.activated`.
 - Refuses: 404.
 
-### PUT /api/v1/internal/tenants/:id/subscription-state
+### PUT /tenants/v1/internal/tenants/:id/subscription-state
 - Handler: SyncSubscriptionState
 - Who may call: internal key (billing).
 - In: `state` required, the billing subscription state.
@@ -128,7 +128,7 @@ Rules shared by every route, stated once:
 - Saves: the mapped status when it changed; announces `tenant.status_changed`, and `tenant.activated` on pending_payment to active.
 - Refuses: 400 `DL_VALIDATION_FAILED`; 404.
 
-### POST /api/v1/internal/sweep-exploring
+### POST /tenants/v1/internal/sweep-exploring
 - Handler: SweepExploring
 - Who may call: internal key.
 - In: nothing.
@@ -136,7 +136,7 @@ Rules shared by every route, stated once:
 - Saves: activates pending exploring tenants; announces `tenant.activated` for each.
 - Refuses: nothing.
 
-### POST /internal/resolve-host
+### POST /tenants/v1/internal/resolve-host
 - Handler: ResolveHost
 - Who may call: Traefik forward auth only; open in code, the network policy keeps others out.
 - In: `X-Forwarded-Host` (or Host); `X-Defolt-Product` optional.
@@ -144,7 +144,7 @@ Rules shared by every route, stated once:
 - Saves: nothing.
 - Refuses: 403 for a missing slug or an archived tenant; 503 `DL_TENANT_RESOLVE_UNAVAILABLE`.
 
-### GET /internal/resolve-host
+### GET /tenants/v1/internal/resolve-host
 - Handler: ResolveHost
 - Who may call: same as the POST form.
 - In: same.

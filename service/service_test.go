@@ -135,11 +135,11 @@ func TestActivatedCarriesTheInboundRequestID(t *testing.T) {
 	var got map[string]any
 	r := gin.New()
 	r.Use(middleware.RequestID())
-	r.POST("/api/v1/internal/tenants/:id/activate", func(c *gin.Context) {
+	r.POST("/tenants/v1/internal/tenants/:id/activate", func(c *gin.Context) {
 		got = activatedPayload(c.Request.Context(), tn)
 		c.Status(http.StatusOK)
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/tenants/"+tn.ID.String()+"/activate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/tenants/v1/internal/tenants/"+tn.ID.String()+"/activate", nil)
 	req.Header.Set(middleware.RequestIDHeader, inbound)
 	r.ServeHTTP(httptest.NewRecorder(), req)
 

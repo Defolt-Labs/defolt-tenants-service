@@ -41,13 +41,10 @@ pdb:
 ingress:
   excludeInternalPaths: true
   securityHeaders: true
-  extraExcludes:
-    - "^/api/v1/internal"
   host: defolt.api.uat.defoltlabs.com
-  stripPrefix: false
-  paths:
-    - /public
-    - /api/v1
+  pathPrefix: /tenants
+  stripPrefix: true
+  versionedPrefix: true
   tls:
     secretName: defolt-api-uat-tls
 

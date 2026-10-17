@@ -140,7 +140,7 @@ func newOrderRig(t *testing.T, identityStatus int) *orderRig {
 	rows := &recordingRows{log: log, byID: map[uuid.UUID]model.Tenant{}}
 
 	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/internal/admin/users" {
+		if r.URL.Path != "/identity/v1/internal/admin/users" {
 			http.NotFound(w, r)
 			return
 		}

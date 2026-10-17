@@ -45,7 +45,7 @@ No `vendor/`. Private modules come from the UAT Athens proxy. On the Mac, with `
 
 ## Who calls it
 
-- Traefik: `/internal/resolve-host` on every tenant request.
-- The signup pages: `POST /api/v1/public/signup` and `GET /api/v1/tenants/by-slug/:slug`.
+- Traefik: `/tenants/v1/internal/resolve-host` on every tenant request.
+- The signup pages: `POST /tenants/v1/public/signup` and `GET /tenants/v1/by-slug/:slug`.
 - defolt-billing-service: activation and subscription state callbacks.
-- Other services and admin tools: the tenant routes under `/api/v1/tenants` with the internal service key.
+- Other services and admin tools: the tenant routes under `/tenants/v1` with the internal service key.

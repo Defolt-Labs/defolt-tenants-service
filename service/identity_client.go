@@ -104,7 +104,7 @@ func (c *IdentityClient) do(ctx context.Context, method, path string, body any) 
 
 // CreateUser provisions an owner account in identity, reporting whether user already existed.
 func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uuid.UUID, bool, error) {
-	raw, err := c.do(ctx, http.MethodPost, "/api/v1/internal/admin/users", map[string]any{
+	raw, err := c.do(ctx, http.MethodPost, "/identity/v1/internal/admin/users", map[string]any{
 		"email":      in.Email,
 		"firstName":  in.FirstName,
 		"middleName": in.MiddleName,
@@ -130,7 +130,7 @@ func (c *IdentityClient) CreateUser(ctx context.Context, in RegisterInput) (*uui
 
 // FindUserIDByEmail resolves a user ID by email via the internal admin endpoint.
 func (c *IdentityClient) FindUserIDByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
-	path := "/api/v1/internal/admin/users/by-email?email=" + url.QueryEscape(email)
+	path := "/identity/v1/internal/admin/users/by-email?email=" + url.QueryEscape(email)
 	raw, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -150,7 +150,7 @@ func (c *IdentityClient) FindUserIDByEmail(ctx context.Context, email string) (*
 
 // ResetPassword sets a fresh one-time password for the user in identity.
 func (c *IdentityClient) ResetPassword(ctx context.Context, userID uuid.UUID, newPassword string) error {
-	path := fmt.Sprintf("/api/v1/internal/admin/users/%s/reset-password", userID)
+	path := fmt.Sprintf("/identity/v1/internal/admin/users/%s/reset-password", userID)
 	_, err := c.do(ctx, http.MethodPost, path, map[string]any{
 		"new_password": newPassword,
 	})
@@ -159,7 +159,7 @@ func (c *IdentityClient) ResetPassword(ctx context.Context, userID uuid.UUID, ne
 
 // DeleteUser deletes an orphaned identity user upon abandoned signup cleanup.
 func (c *IdentityClient) DeleteUser(ctx context.Context, userID uuid.UUID) error {
-	path := fmt.Sprintf("/api/v1/internal/admin/users/%s?reason=tenant_signup_abandoned", userID)
+	path := fmt.Sprintf("/identity/v1/internal/admin/users/%s?reason=tenant_signup_abandoned", userID)
 	_, err := c.do(ctx, http.MethodDelete, path, nil)
 	return err
 }

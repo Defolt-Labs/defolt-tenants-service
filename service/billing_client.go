@@ -51,7 +51,7 @@ func (c *BillingClient) CreateCheckout(ctx context.Context, tenantID uuid.UUID, 
 		return nil, fmt.Errorf("billing-client: baseURL not configured")
 	}
 	body, _ := json.Marshal(map[string]any{"owner_email": ownerEmail, "redirect_url": redirectURL})
-	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/checkout", c.baseURL, tenantID)
+	url := fmt.Sprintf("%s/billing/v1/internal/tenants/%s/checkout", c.baseURL, tenantID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (c *BillingClient) SubscriptionState(ctx context.Context, tenantID uuid.UUI
 	if c == nil || c.baseURL == "" {
 		return "", fmt.Errorf("billing-client: baseURL not configured")
 	}
-	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/entitlement", c.baseURL, tenantID)
+	url := fmt.Sprintf("%s/billing/v1/internal/tenants/%s/entitlement", c.baseURL, tenantID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
