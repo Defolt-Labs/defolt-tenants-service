@@ -9,6 +9,9 @@ when:
 
 steps:
   - name: test
+    when:
+      event: push
+      branch: staging
     image: golang:1.26-alpine
     environment:
       # Modules come from Athens at goproxy.uat.defoltlabs.com (org secret goproxy_url); it serves the private kits.
@@ -38,7 +41,7 @@ steps:
       - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
       - printf '{"auths":{"registry.uat.defoltlabs.com":{"auth":"%s"}}}' "$AUTH" > /kaniko/.docker/config.json
       - >-
-        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --build-arg GOPROXY="$GOPROXY_URL|https://proxy.golang.org|direct" --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_PIPELINE_NUMBER} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:latest --cache=true --cache-repo=registry.uat.defoltlabs.com/cache/${CI_REPO_NAME} --cache-ttl=336h --digest-file=/kaniko/digest-file
+        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --build-arg GOPROXY="$GOPROXY_URL|https://proxy.golang.org|direct" --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_PIPELINE_NUMBER} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_COMMIT_SHA} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:latest --cache=true --cache-repo=registry.uat.defoltlabs.com/cache/${CI_REPO_NAME} --cache-ttl=336h --digest-file=/kaniko/digest-file
 
   - name: upload-values
     when:
@@ -71,24 +74,47 @@ steps:
             --wait --timeout 3m
         - rm -rf /tmp/${CI_REPO_NAME}-${CI_PIPELINE_NUMBER}
 
-  - name: build-image-prod
+  - name: promote-image
     when:
       event: tag
-    image: gcr.io/kaniko-project/executor:debug
+    image: quay.io/skopeo/stable:latest
     environment:
       REGISTRY_USER:
         from_secret: registry_username
       REGISTRY_PASS:
         from_secret: registry_password
-      # Private kits come through Athens; the build-arg carries the creds URL, with the public proxy as fallback.
-      GOPROXY_URL:
-        from_secret: goproxy_url
     commands:
-      - mkdir -p /kaniko/.docker
-      - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
-      - printf '{"auths":{"registry.uat.defoltlabs.com":{"auth":"%s"}}}' "$AUTH" > /kaniko/.docker/config.json
-      - >-
-        /kaniko/executor --dockerfile=Dockerfile --context=dir://. --build-arg GOPROXY="$GOPROXY_URL|https://proxy.golang.org|direct" --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:${CI_COMMIT_TAG} --destination=registry.uat.defoltlabs.com/${CI_REPO_NAME}:prod --cache=true --cache-repo=registry.uat.defoltlabs.com/cache/${CI_REPO_NAME} --cache-ttl=336h --digest-file=/kaniko/digest-file
+      # A tag promotes the image UAT already built and never rebuilds; one block scalar because Woodpecker expands CI variables before parsing.
+      - |
+        REG=registry.uat.defoltlabs.com
+        REPO=${CI_REPO_NAME}
+        SHA=${CI_COMMIT_SHA}
+        TAG=${CI_COMMIT_TAG}
+        mkdir -p /tmp/auth
+        AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_PASS" | base64 -w0)
+        printf '{"auths":{"%s":{"auth":"%s"}}}' "$REG" "$AUTH" > /tmp/auth/config.json
+        export REGISTRY_AUTH_FILE=/tmp/auth/config.json
+        SRC="docker://$REG/$REPO:$SHA"
+        if ! SRC_DIGEST=$(skopeo inspect --format '{{.Digest}}' "$SRC"); then
+          echo "FAIL: $REG/$REPO:$SHA does not exist."
+          echo "Commit $SHA was never built on staging, so there is no UAT-proved"
+          echo "image to promote. Merge the commit to staging, let that pipeline"
+          echo "build and deploy it, then cut the tag from that commit."
+          echo "This step promotes only; it never builds."
+          exit 1
+        fi
+        echo "source $REPO:$SHA $SRC_DIGEST"
+        skopeo copy --all "$SRC" "docker://$REG/$REPO:$TAG"
+        skopeo copy --all "$SRC" "docker://$REG/$REPO:prod"
+        TAG_DIGEST=$(skopeo inspect --format '{{.Digest}}' "docker://$REG/$REPO:$TAG")
+        PROD_DIGEST=$(skopeo inspect --format '{{.Digest}}' "docker://$REG/$REPO:prod")
+        echo "dest $REPO:$TAG $TAG_DIGEST"
+        echo "dest $REPO:prod $PROD_DIGEST"
+        if [ "$SRC_DIGEST" != "$TAG_DIGEST" ] || [ "$SRC_DIGEST" != "$PROD_DIGEST" ]; then
+          echo "FAIL: a promoted tag does not carry the source digest."
+          exit 1
+        fi
+        echo "promoted $REPO $SRC_DIGEST to $TAG and prod"
 
   - name: upload-prod-values
     image: appleboy/drone-scp
