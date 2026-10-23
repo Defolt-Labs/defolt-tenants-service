@@ -33,6 +33,7 @@ a tenant. It knows nothing about shelves or patients. Go, Gin, GORM on Postgres,
 
 Needs Postgres, Redis and NATS settings from the environment (names in `config/config.go`).
 `go run .` listens on `SERVER_PORT` (8080). With `AUTO_MIGRATE=true` it creates the table itself.
+Against the UAT stores through the tunnel, `LOCAL_MODE=true` (set by `office/tools/local-env.sh`) refuses a non-loopback database or a production environment and starts no sweeps; run it with `office/tools/local-run.sh defolt-tenants-service <worktree>`.
 
 ## Internal keys
 

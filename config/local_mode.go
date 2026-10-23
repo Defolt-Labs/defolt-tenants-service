@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// LOCAL_MODE is a run of this service on a developer's Mac against the UAT stores.
-
 // CheckLocalMode reports why this configuration may not run in local mode, or nil.
 func (c *Config) CheckLocalMode() error {
 	if !c.LocalMode {
