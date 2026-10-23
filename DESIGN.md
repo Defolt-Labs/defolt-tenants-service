@@ -46,6 +46,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - CI on a staging push: `go mod download`, `go vet ./...`, `go test ./... -count=1`, then the kaniko image build.
 - Locally also: `gofmt -l .` empty, `go build ./...`.
 - `python3 office/tools/check-endpoints.py <repo>` prints PASS.
+- `trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .` exits 0; the pipeline does not run it yet.
 - The testkit coupling test fails the build when a type, field or function names a product-owned concept.
 
 ## Invariants
