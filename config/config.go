@@ -20,8 +20,11 @@ type Config struct {
 	MaxOpenConns, MaxIdleConns                            int
 	ConnMaxLifetime                                       time.Duration
 
-	NatsURL            string
+	NatsURL string
+	// InternalServiceKey is the inbound verifier value: a bare key or a name=key set.
 	InternalServiceKey string
+	// OutboundServiceKey is the single key sent to identity and billing.
+	OutboundServiceKey string
 	AutoMigrate        bool
 
 	// RedisURL configures lookup cache for resolve-host.
@@ -80,6 +83,7 @@ func Load() (*Config, error) {
 
 		NatsURL:            getStr("NATS_URL", "nats://defolt-nats:4222"),
 		InternalServiceKey: getStr("INTERNAL_SERVICE_KEYS", getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", ""))),
+		OutboundServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
 		AutoMigrate:        getBool("AUTO_MIGRATE", true),
 
 		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),
@@ -100,8 +104,9 @@ func Load() (*Config, error) {
 func (c *Config) Validate() error {
 	var missing []string
 	for k, v := range map[string]string{
-		"DEFOLT_TENANTS_DB_PASSWORD":  c.DBPassword,
-		"DEFOLT_INTERNAL_SERVICE_KEY": c.InternalServiceKey,
+		"DEFOLT_TENANTS_DB_PASSWORD":                          c.DBPassword,
+		"INTERNAL_SERVICE_KEYS or INTERNAL_SERVICE_KEY":       c.InternalServiceKey,
+		"DEFOLT_INTERNAL_SERVICE_KEY or INTERNAL_SERVICE_KEY": c.OutboundServiceKey,
 	} {
 		if strings.TrimSpace(v) == "" {
 			missing = append(missing, k)

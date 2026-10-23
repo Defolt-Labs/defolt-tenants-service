@@ -26,7 +26,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Soft delete via `deleted_at`; abandoned signups are deleted for good after retention.
 
 ## Refusals
-- Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`.
+- Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`. The inbound value is a bare key or a `name=key,name=key` set; each named entry is accepted and the matched name is stamped on the request. A missing inbound or outbound key stops the boot.
 - Signup without a passing Turnstile check: 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`.
 - The health product refuses a tenant with no owner: 400 `DL_TENANT_OWNER_REQUIRED`.
 - Every refusal carries English and Kiswahili text.
@@ -39,6 +39,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 ## Upstream calls
 - defolt-identity-service: create or find the owner, reset the owner password.
 - defolt-billing-service: registration checkout and payment link.
+- Both are called with this namespace's single outbound key, never the inbound set.
 - Cloudflare Turnstile: human check on public signup.
 
 ## The gate
