@@ -34,6 +34,11 @@ a tenant. It knows nothing about shelves or patients. Go, Gin, GORM on Postgres,
 Needs Postgres, Redis and NATS settings from the environment (names in `config/config.go`).
 `go run .` listens on `SERVER_PORT` (8080). With `AUTO_MIGRATE=true` it creates the table itself.
 
+## Internal keys
+
+- Inbound: `INTERNAL_SERVICE_KEYS` (a `name=key` set), else `DEFOLT_INTERNAL_SERVICE_KEY`, else `INTERNAL_SERVICE_KEY`.
+- Outbound, sent to identity and billing: `DEFOLT_INTERNAL_SERVICE_KEY`, else `INTERNAL_SERVICE_KEY`. Always one key, never the set.
+
 ## Modules
 
 No `vendor/`. Private modules come from the UAT Athens proxy. On the Mac, with `defolt-tunnel` up:
