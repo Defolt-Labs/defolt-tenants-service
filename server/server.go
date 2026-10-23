@@ -48,7 +48,13 @@ func Initialize() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	database.EnsureSchema(db, cfg)
+	plan := planBoot(cfg.LocalMode)
+	if cfg.LocalMode {
+		logger.LogWarn("", "local-mode", localBanner())
+	}
+	if plan.Migrate {
+		database.EnsureSchema(db, cfg)
+	}
 
 	nc, err := nats.Connect(cfg.NatsURL, nats.Name("defolt-tenants-service"))
 	if err != nil {
@@ -76,8 +82,11 @@ func Initialize() (*App, error) {
 	routes.Mount(routes.Config{Engine: engine, Config: cfg, Handlers: h})
 
 	app := &App{Config: cfg, Engine: engine, DB: db, NC: nc, Cache: rc}
-	app.startSweeper(svc)
-	app.startExploreActivator(svc)
+	// LOCAL_MODE leaves the sweeps to the UAT pods: they delete and activate tenant rows.
+	if plan.Tickers {
+		app.startSweeper(svc)
+		app.startExploreActivator(svc)
+	}
 	return app, nil
 }
 

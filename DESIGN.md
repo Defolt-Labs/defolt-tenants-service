@@ -56,3 +56,4 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Route paths and reply codes change by addition only.
 - The service never boots without both an inbound and an outbound internal key; the refusal names the variables, never a value (config_test.go).
 - The outbound header is never the inbound set (config_test.go).
+- LOCAL_MODE refuses a non-loopback database host and a production environment, and starts neither sweep (local_mode_test.go).
