@@ -9,7 +9,7 @@ image:
 port: 8080
 
 env:
-  SERVICE_VERSION: "v0.7.2"
+  SERVICE_VERSION: "v0.7.3"
   SERVER_PORT: "8080"
   DB_HOST: defolt-postgres
   DB_PORT: "5432"

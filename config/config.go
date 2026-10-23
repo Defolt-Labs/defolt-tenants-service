@@ -27,6 +27,9 @@ type Config struct {
 	OutboundServiceKey string
 	AutoMigrate        bool
 
+	// LocalMode is a run on a developer's Mac against the UAT stores through the tunnel (LOCAL_MODE=true, office/tools/local-run.sh).
+	LocalMode bool
+
 	// RedisURL configures lookup cache for resolve-host.
 	RedisURL string
 
@@ -85,6 +88,7 @@ func Load() (*Config, error) {
 		InternalServiceKey: getStr("INTERNAL_SERVICE_KEYS", getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", ""))),
 		OutboundServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
 		AutoMigrate:        getBool("AUTO_MIGRATE", true),
+		LocalMode:          getBool("LOCAL_MODE", false),
 
 		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),
 		ReservedSlugs: reserved,
@@ -96,6 +100,9 @@ func Load() (*Config, error) {
 		BillingURL: getStr("DEFOLT_BILLING_URL", "http://defolt-billing-service:8080"),
 	}
 	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	if err := c.CheckLocalMode(); err != nil {
 		return nil, err
 	}
 	return c, nil
