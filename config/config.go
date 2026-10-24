@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	hk "github.com/Defolt-Labs/defolt-httpkit"
 )
 
 type Config struct {
@@ -21,8 +23,8 @@ type Config struct {
 	ConnMaxLifetime                                       time.Duration
 
 	NatsURL string
-	// InternalServiceKey is the inbound verifier value: a bare key or a name=key set.
-	InternalServiceKey string
+	// InternalKeys is what the internal routes accept: the pairs of INTERNAL_SERVICE_KEYS when it is set, else the outbound key whole.
+	InternalKeys hk.KeySet
 	// OutboundServiceKey is the single key sent to identity and billing.
 	OutboundServiceKey string
 	AutoMigrate        bool
@@ -85,7 +87,6 @@ func Load() (*Config, error) {
 		ConnMaxLifetime: time.Duration(getInt("DB_CONN_MAX_LIFETIME_MIN", 15)) * time.Minute,
 
 		NatsURL:            getStr("NATS_URL", "nats://defolt-nats:4222"),
-		InternalServiceKey: getStr("INTERNAL_SERVICE_KEYS", getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", ""))),
 		OutboundServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
 		AutoMigrate:        getBool("AUTO_MIGRATE", true),
 		LocalMode:          getBool("LOCAL_MODE", false),
@@ -102,6 +103,12 @@ func Load() (*Config, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
+	// A malformed INTERNAL_SERVICE_KEYS stops boot; the error names an entry by position, never a value.
+	set, err := hk.NewKeySet(c.OutboundServiceKey, os.Getenv("INTERNAL_SERVICE_KEYS"))
+	if err != nil {
+		return nil, fmt.Errorf("INTERNAL_SERVICE_KEYS: %w", err)
+	}
+	c.InternalKeys = set
 	if err := c.CheckLocalMode(); err != nil {
 		return nil, err
 	}
@@ -112,7 +119,6 @@ func (c *Config) Validate() error {
 	var missing []string
 	for k, v := range map[string]string{
 		"DEFOLT_TENANTS_DB_PASSWORD":                          c.DBPassword,
-		"INTERNAL_SERVICE_KEYS or INTERNAL_SERVICE_KEY":       c.InternalServiceKey,
 		"DEFOLT_INTERNAL_SERVICE_KEY or INTERNAL_SERVICE_KEY": c.OutboundServiceKey,
 	} {
 		if strings.TrimSpace(v) == "" {

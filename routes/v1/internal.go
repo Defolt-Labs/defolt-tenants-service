@@ -6,7 +6,7 @@ import "defolt-tenants-service/middleware"
 func RegisterInternal(c Config) {
 	h := c.Handlers
 
-	internal := c.Engine.Group("", middleware.InternalServiceKey(c.Config.InternalServiceKey))
+	internal := c.Engine.Group("", middleware.InternalServiceKey(c.Config.InternalKeys))
 	{
 		internal.POST("/tenants/v1/internal/tenants/:id/activate", h.Activate)
 		internal.PUT("/tenants/v1/internal/tenants/:id/subscription-state", h.SyncSubscriptionState)

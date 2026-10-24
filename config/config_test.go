@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	hk "github.com/Defolt-Labs/defolt-httpkit"
 )
 
 func clearKeys(t *testing.T) {
@@ -22,8 +24,10 @@ func TestLoadSplitsInboundSetFromOutboundKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.InternalServiceKey != "platform=k1,dhs=k2,drs=k3" {
-		t.Fatalf("inbound = %q, want the named set", c.InternalServiceKey)
+	for presented, want := range map[string]string{"k1": "platform", "k2": "dhs", "k3": "drs"} {
+		if got, ok := c.InternalKeys.Match(presented); !ok || got != want {
+			t.Fatalf("inbound Match(%q) = %q, %v; want %q", presented, got, ok, want)
+		}
 	}
 	if c.OutboundServiceKey != "k1" {
 		t.Fatalf("outbound = %q, want the single key", c.OutboundServiceKey)
@@ -39,8 +43,11 @@ func TestLoadOutboundPrefersDefoltKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.OutboundServiceKey != "own" || c.InternalServiceKey != "own" {
-		t.Fatalf("inbound %q outbound %q, want own for both", c.InternalServiceKey, c.OutboundServiceKey)
+	if _, ok := c.InternalKeys.Match("own"); !ok || c.OutboundServiceKey != "own" {
+		t.Fatalf("outbound %q, want own for both directions", c.OutboundServiceKey)
+	}
+	if _, ok := c.InternalKeys.Match("fleet"); ok {
+		t.Fatal("the fleet key was accepted beside the service's own")
 	}
 }
 
@@ -52,8 +59,8 @@ func TestLoadBareKeyServesBothDirections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.InternalServiceKey != "only" || c.OutboundServiceKey != "only" {
-		t.Fatalf("inbound %q outbound %q, want only for both", c.InternalServiceKey, c.OutboundServiceKey)
+	if _, ok := c.InternalKeys.Match("only"); !ok || c.OutboundServiceKey != "only" {
+		t.Fatalf("outbound %q, want only for both directions", c.OutboundServiceKey)
 	}
 }
 
@@ -82,6 +89,38 @@ func TestLoadRefusesACommaInTheOutboundKey(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "s3cr3t") {
 			t.Fatalf("%s: the refusal repeats the key: %v", name, err)
+		}
+	}
+}
+
+func TestLoadNamedSetWinsOverTheSingleKey(t *testing.T) {
+	clearKeys(t)
+	t.Setenv("INTERNAL_SERVICE_KEYS", "platform=k1")
+	t.Setenv("INTERNAL_SERVICE_KEY", "old")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := c.InternalKeys.Match("old"); ok {
+		t.Fatal("the single key was accepted beside a named set")
+	}
+	if c.InternalKeys.Source() != hk.KeySourceNamed {
+		t.Fatalf("source = %q, want %q", c.InternalKeys.Source(), hk.KeySourceNamed)
+	}
+}
+
+func TestLoadRefusesAMalformedNamedSetWithoutRepeatingIt(t *testing.T) {
+	for _, bad := range []string{"platform=s3cr3t,s3cr3tbare", "Platform=s3cr3t", "platform=", "a=s3cr3t,a=other"} {
+		clearKeys(t)
+		t.Setenv("INTERNAL_SERVICE_KEYS", bad)
+		t.Setenv("INTERNAL_SERVICE_KEY", "k1")
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+		if strings.Contains(err.Error(), "s3cr3t") || strings.Contains(err.Error(), "other") {
+			t.Fatalf("the refusal repeats a value: %v", err)
 		}
 	}
 }

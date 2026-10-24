@@ -44,6 +44,7 @@ func Initialize() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	logger.LogInfo("internal-keys", "inbound internal keys: "+cfg.InternalKeys.Source())
 	db, err := database.Connect(cfg)
 	if err != nil {
 		return nil, err

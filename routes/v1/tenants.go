@@ -6,7 +6,7 @@ import "defolt-tenants-service/middleware"
 func RegisterTenants(c Config) {
 	h := c.Handlers
 
-	admin := c.Engine.Group("", middleware.InternalServiceKey(c.Config.InternalServiceKey))
+	admin := c.Engine.Group("", middleware.InternalServiceKey(c.Config.InternalKeys))
 	{
 		admin.POST("/tenants/v1", h.Create)
 		admin.GET("/tenants/v1/:id", h.Get)

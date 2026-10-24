@@ -4,6 +4,7 @@ import (
 	"defolt-tenants-service/reqid"
 	"defolt-tenants-service/response"
 
+	hk "github.com/Defolt-Labs/defolt-httpkit"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -44,11 +45,10 @@ func GetRequestID(c *gin.Context) string {
 	return ""
 }
 
-// InternalServiceKey gates internal routes using constant-time key comparison.
-func InternalServiceKey(sharedSecret string) gin.HandlerFunc {
-	keys := parseKeySet(sharedSecret)
+// InternalServiceKey gates internal routes on the key set; the refusal keeps this service's envelope.
+func InternalServiceKey(keys hk.KeySet) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		caller, ok := keys.match(c.GetHeader(InternalKeyHeader))
+		caller, ok := keys.Match(c.GetHeader(InternalKeyHeader))
 		if !ok {
 			response.Unauthorized(c, response.ErrForbidden.Code, response.ErrForbidden.Meta)
 			c.Abort()
