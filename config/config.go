@@ -122,6 +122,9 @@ func (c *Config) Validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("required env vars missing: %s", strings.Join(missing, ", "))
 	}
+	if strings.Contains(c.OutboundServiceKey, ",") {
+		return fmt.Errorf("DEFOLT_INTERNAL_SERVICE_KEY or INTERNAL_SERVICE_KEY holds a comma: it is the one key sent to identity and billing, a named set belongs in INTERNAL_SERVICE_KEYS")
+	}
 	return nil
 }
 

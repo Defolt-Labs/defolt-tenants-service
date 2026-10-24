@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func clearKeys(t *testing.T) {
 	t.Helper()
@@ -66,5 +69,19 @@ func TestLoadRefusesWhenOnlyTheSetIsGiven(t *testing.T) {
 	t.Setenv("INTERNAL_SERVICE_KEYS", "platform=k1")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load accepted a set with no outbound key")
+	}
+}
+
+func TestLoadRefusesACommaInTheOutboundKey(t *testing.T) {
+	for _, name := range []string{"DEFOLT_INTERNAL_SERVICE_KEY", "INTERNAL_SERVICE_KEY"} {
+		clearKeys(t)
+		t.Setenv(name, "platform=s3cr3t,dhs=other")
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("%s holding a comma was accepted", name)
+		}
+		if strings.Contains(err.Error(), "s3cr3t") {
+			t.Fatalf("%s: the refusal repeats the key: %v", name, err)
+		}
 	}
 }
