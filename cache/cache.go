@@ -3,6 +3,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"defolt-tenants-service/logger"
@@ -25,7 +26,7 @@ func Connect(redisURL string) *Cache {
 		logger.LogInfo("cache", "REDIS_URL empty; running cache-less")
 		return nil
 	}
-	opt, err := redis.ParseURL(redisURL)
+	opt, err := parseRedisURL(redisURL)
 	if err != nil {
 		logger.LogWarn("", "cache", "invalid REDIS_URL, running cache-less: "+err.Error())
 		return nil
@@ -40,6 +41,15 @@ func Connect(redisURL string) *Cache {
 	}
 	logger.LogInfo("cache", "redis connected")
 	return &Cache{rdb: rdb}
+}
+
+// parseRedisURL hides the parse error, whose text can repeat the URL with its password.
+func parseRedisURL(redisURL string) (*redis.Options, error) {
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, errors.New("REDIS_URL will not parse")
+	}
+	return opt, nil
 }
 
 func (c *Cache) Close() {

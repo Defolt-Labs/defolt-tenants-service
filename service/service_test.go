@@ -10,6 +10,7 @@ import (
 
 	"defolt-tenants-service/middleware"
 	"defolt-tenants-service/model"
+	"defolt-tenants-service/reqid"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -385,7 +386,7 @@ func TestTenantCreatedCarriesTheNames(t *testing.T) {
 		OwnerLastName:   "Sekwala",
 	}
 
-	raw, err := json.Marshal(tenantCreatedPayload(tenant))
+	raw, err := json.Marshal(tenantCreatedPayload(context.Background(), tenant))
 	if err != nil {
 		t.Fatalf("marshal tenant.created: %v", err)
 	}
@@ -420,8 +421,20 @@ func TestTenantCreatedCarriesTheNames(t *testing.T) {
 	}
 }
 
+func TestTenantCreatedCarriesTheInboundRequestID(t *testing.T) {
+	tenant := &model.Tenant{ID: uuid.New(), Slug: "kariakoo-duka", Name: "Kariakoo Duka", Status: model.StatusPendingPayment}
+	ctx := reqid.With(context.Background(), "req-created-1")
+
+	if got := tenantCreatedPayload(ctx, tenant)["request_id"]; got != "req-created-1" {
+		t.Fatalf("request_id on tenant.created = %v, want req-created-1", got)
+	}
+	if got, ok := tenantCreatedPayload(context.Background(), tenant)["request_id"]; !ok || got != "" {
+		t.Fatalf("request_id = %v (present %v) for a context that carries none", got, ok)
+	}
+}
+
 func TestTenantCreatedSurvivesAnOwnerlessTenant(t *testing.T) {
-	got := tenantCreatedPayload(&model.Tenant{
+	got := tenantCreatedPayload(context.Background(), &model.Tenant{
 		ID:     uuid.New(),
 		Slug:   "kariakoo-duka",
 		Name:   "Kariakoo Duka",
@@ -429,7 +442,7 @@ func TestTenantCreatedSurvivesAnOwnerlessTenant(t *testing.T) {
 	})
 	for _, k := range []string{
 		"tenant_id", "slug", "name", "owner_email", "product", "state",
-		"owner_first_name", "owner_middle_name", "owner_last_name",
+		"owner_first_name", "owner_middle_name", "owner_last_name", "request_id",
 	} {
 		if _, ok := got[k]; !ok {
 			t.Errorf("%s: key missing on ownerless tenant", k)

@@ -225,7 +225,7 @@ func assertPayloadUnchanged(t *testing.T, l *orderLog, row *model.Tenant) {
 	if len(l.created) != 1 {
 		t.Fatalf("captured %d tenant.created payloads, want 1", len(l.created))
 	}
-	want, err := json.Marshal(tenantCreatedPayload(row))
+	want, err := json.Marshal(tenantCreatedPayload(context.Background(), row))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func assertPayloadUnchanged(t *testing.T, l *orderLog, row *model.Tenant) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	wantKeys := []string{"name", "owner_email", "owner_first_name", "owner_last_name", "owner_middle_name", "product", "slug", "state", "tenant_id"}
+	wantKeys := []string{"name", "owner_email", "owner_first_name", "owner_last_name", "owner_middle_name", "product", "request_id", "slug", "state", "tenant_id"}
 	if !reflect.DeepEqual(keys, wantKeys) {
 		t.Errorf("tenant.created keys = %v, want %v", keys, wantKeys)
 	}

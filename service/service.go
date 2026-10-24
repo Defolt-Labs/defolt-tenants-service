@@ -102,7 +102,7 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	if err != nil {
 		return nil, err
 	}
-	s.emit("tenant.created", tenantCreatedPayload(t))
+	s.emit("tenant.created", tenantCreatedPayload(ctx, t))
 	return t, nil
 }
 
@@ -164,7 +164,7 @@ func ownerExistedOnCreate(owner *uuid.UUID) *bool {
 }
 
 // tenantCreatedPayload constructs the wire payload for tenant.created.
-func tenantCreatedPayload(t *model.Tenant) map[string]any {
+func tenantCreatedPayload(ctx context.Context, t *model.Tenant) map[string]any {
 	return map[string]any{
 		"tenant_id":         t.ID,
 		"slug":              t.Slug,
@@ -175,6 +175,7 @@ func tenantCreatedPayload(t *model.Tenant) map[string]any {
 		"owner_first_name":  t.OwnerFirstName,
 		"owner_middle_name": t.OwnerMiddleName,
 		"owner_last_name":   t.OwnerLastName,
+		"request_id":        reqid.From(ctx),
 	}
 }
 
@@ -365,7 +366,7 @@ func (s *TenantsService) ActivateExploring(ctx context.Context, id uuid.UUID) (*
 	if t.ActivatedAt == nil {
 		t.ActivatedAt = &now
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	if err := s.repo.SaveActivation(ctx, t); err != nil {
 		return nil, false, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
@@ -408,7 +409,7 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 		now := time.Now()
 		t.ActivatedAt = &now
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	if err := s.repo.SaveActivation(ctx, t); err != nil {
 		return nil, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)

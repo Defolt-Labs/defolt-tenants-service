@@ -114,7 +114,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		}
 	}
 
-	s.emit("tenant.created", tenantCreatedPayload(t))
+	s.emit("tenant.created", tenantCreatedPayload(ctx, t))
 
 	var checkout *CheckoutResult
 	var billErr error

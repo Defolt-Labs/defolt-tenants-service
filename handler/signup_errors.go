@@ -9,19 +9,11 @@ import (
 	"defolt-tenants-service/response"
 	"defolt-tenants-service/service"
 
+	// httpkit registers json tag names on gin's validator when imported, so fe.Field() is already the json name.
+	_ "github.com/Defolt-Labs/defolt-httpkit"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 )
-
-// signupJSONField maps signup body struct fields to json parameter names.
-var signupJSONField = map[string]string{
-	"Slug":         "slug",
-	"Name":         "name",
-	"ContactEmail": "contact_email",
-	"Phone":        "phone",
-	"FirstName":    "first_name",
-	"LastName":     "last_name",
-}
 
 type signupFieldDetails struct {
 	Field  string `json:"field"`
@@ -33,7 +25,7 @@ func writeSignupBindError(c *gin.Context, err error) {
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) && len(ve) > 0 {
 		fe := ve[0]
-		field := signupJSONField[fe.Field()]
+		field := fe.Field()
 		switch fe.Tag() {
 		case "required":
 			if meta, ok := response.SignupFieldRequired(field); ok {
