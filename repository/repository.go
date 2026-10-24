@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"defolt-tenants-service/model"
@@ -85,15 +86,31 @@ func (r *Repo) FindPendingByContactEmail(ctx context.Context, email, product str
 	return &t, err
 }
 
-// SaveDetails updates only name, contact_email, phone and plan, the fields an edit changes.
-func (r *Repo) SaveDetails(ctx context.Context, t *model.Tenant) error {
-	return r.saveDetailsQuery(ctx, t).Error
+// editable is the set of columns an edit may write.
+var editable = map[string]bool{"name": true, "contact_email": true, "phone": true, "plan": true}
+
+// SaveDetails updates only the named columns, each one of name, contact_email, phone and plan.
+func (r *Repo) SaveDetails(ctx context.Context, t *model.Tenant, columns ...string) error {
+	if err := checkEditColumns(columns); err != nil {
+		return err
+	}
+	return r.saveDetailsQuery(ctx, t, columns).Error
 }
 
-func (r *Repo) saveDetailsQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
-	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
-		Select("name", "contact_email", "phone", "plan").
-		Updates(t)
+func checkEditColumns(columns []string) error {
+	if len(columns) == 0 {
+		return errors.New("no columns to save")
+	}
+	for _, c := range columns {
+		if !editable[c] {
+			return fmt.Errorf("column %q is not editable", c)
+		}
+	}
+	return nil
+}
+
+func (r *Repo) saveDetailsQuery(ctx context.Context, t *model.Tenant, columns []string) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).Select(columns).Updates(t)
 }
 
 // SaveName updates only name.

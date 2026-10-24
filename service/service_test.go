@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -450,5 +451,41 @@ func TestTenantCreatedSurvivesAnOwnerlessTenant(t *testing.T) {
 	}
 	if got["name"] != "Kariakoo Duka" {
 		t.Errorf("name: want %q, got %v", "Kariakoo Duka", got["name"])
+	}
+}
+
+func TestApplyUpdateNamesOnlyTheFieldsTheRequestSet(t *testing.T) {
+	name, plan, phone := "New Name", "premium", "0712345678"
+	cases := []struct {
+		name string
+		in   UpdateInput
+		want []string
+	}{
+		{"name only", UpdateInput{Name: &name}, []string{"name"}},
+		{"plan only", UpdateInput{Plan: &plan}, []string{"plan"}},
+		{"phone only", UpdateInput{Phone: &phone}, []string{"phone"}},
+		{"name and plan", UpdateInput{Name: &name, Plan: &plan}, []string{"name", "plan"}},
+		{"nothing", UpdateInput{}, nil},
+	}
+	for _, tc := range cases {
+		tn := &model.Tenant{Name: "Old", Plan: "standard", Phone: "+255700000000", ContactEmail: "o@example.com"}
+		got, err := applyUpdate(tn, tc.in)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: columns %v, want %v", tc.name, got, tc.want)
+		}
+		if tn.ContactEmail != "o@example.com" {
+			t.Errorf("%s: contact_email changed", tc.name)
+		}
+	}
+}
+
+func TestApplyUpdateLeavesAnUnchangedPhoneOut(t *testing.T) {
+	same := "+255700000000"
+	got, err := applyUpdate(&model.Tenant{Phone: same}, UpdateInput{Phone: &same})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("columns %v err %v, want none", got, err)
 	}
 }
