@@ -58,6 +58,6 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Route paths and reply codes change by addition only.
 - The service never boots without an outbound internal key (the single inbound key too, unless a named set is given); the refusal names the variables, never a value (config_test.go).
 - A connection URL that will not parse is logged as a fixed sentence, never the parse error, which repeats the password (cache_test.go, nats_err_test.go).
-- Activation and billing sync write only `status` and `activated_at`; an owner written since the row was read survives (repository_test.go).
+- Every write to an existing tenant names its columns: an edit writes name, contact email, phone and plan; registration activation writes status, activated_at and the trial window; billing sync writes status and activated_at; a signup resume writes name or phone; an owner lookup writes owner_user_id and owner_email. There is no whole-row save, so a column changed since the row was read survives (repository_test.go).
 - The outbound header is never the inbound set (config_test.go).
 - LOCAL_MODE refuses a non-loopback database host and a production environment (config_test.go), and runs the svckit local plan: no migration, no NATS connection, no sweep.

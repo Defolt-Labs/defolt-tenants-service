@@ -163,14 +163,14 @@ func (s *TenantsService) resumeStalledSignup(ctx context.Context, in SignupInput
 	}
 	if strings.TrimSpace(in.Name) != "" && in.Name != existing.Name {
 		existing.Name = in.Name
-		if err := s.rows.Save(ctx, existing); err != nil {
+		if err := s.rows.SaveName(ctx, existing); err != nil {
 			logger.LogWarn(reqid.From(ctx), "signup-resume-name", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
 		}
 	}
 	if strings.TrimSpace(in.Phone) != "" {
 		if norm, perr := RequirePhone(in.Phone); perr == nil && norm != existing.Phone {
 			existing.Phone = norm
-			if err := s.rows.Save(ctx, existing); err != nil {
+			if err := s.rows.SavePhone(ctx, existing); err != nil {
 				logger.LogWarn(reqid.From(ctx), "signup-resume-phone", fmt.Sprintf("tenant=%s: %v", existing.ID, err))
 			}
 		}
