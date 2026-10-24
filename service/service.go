@@ -102,7 +102,7 @@ func (s *TenantsService) Create(ctx context.Context, in CreateInput) (*model.Ten
 	if err != nil {
 		return nil, err
 	}
-	s.emit("tenant.created", tenantCreatedPayload(t))
+	s.emit("tenant.created", tenantCreatedPayload(ctx, t))
 	return t, nil
 }
 
@@ -164,7 +164,7 @@ func ownerExistedOnCreate(owner *uuid.UUID) *bool {
 }
 
 // tenantCreatedPayload constructs the wire payload for tenant.created.
-func tenantCreatedPayload(t *model.Tenant) map[string]any {
+func tenantCreatedPayload(ctx context.Context, t *model.Tenant) map[string]any {
 	return map[string]any{
 		"tenant_id":         t.ID,
 		"slug":              t.Slug,
@@ -175,6 +175,7 @@ func tenantCreatedPayload(t *model.Tenant) map[string]any {
 		"owner_first_name":  t.OwnerFirstName,
 		"owner_middle_name": t.OwnerMiddleName,
 		"owner_last_name":   t.OwnerLastName,
+		"request_id":        reqid.From(ctx),
 	}
 }
 
