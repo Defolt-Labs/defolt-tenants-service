@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,8 +13,15 @@ import (
 	"defolt-tenants-service/response"
 	"defolt-tenants-service/service"
 
+	hk "github.com/Defolt-Labs/defolt-httpkit"
 	"github.com/gin-gonic/gin"
 )
+
+// The server registers the json field names at boot; the handler tests do the same.
+func TestMain(m *testing.M) {
+	hk.RegisterJSONFieldNames()
+	os.Exit(m.Run())
+}
 
 const signupRID = "test-signup-0f1e2d3c"
 

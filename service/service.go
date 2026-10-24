@@ -74,7 +74,8 @@ type signupRows interface {
 	Insert(ctx context.Context, t *model.Tenant) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.Tenant, error)
 	FindBySlug(ctx context.Context, namespace, slug string) (*model.Tenant, error)
-	Save(ctx context.Context, t *model.Tenant) error
+	SaveName(ctx context.Context, t *model.Tenant) error
+	SavePhone(ctx context.Context, t *model.Tenant) error
 	SaveOwner(ctx context.Context, t *model.Tenant) error
 }
 
@@ -244,7 +245,7 @@ func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInpu
 	if !changed {
 		return t, nil
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	if err := s.repo.SaveDetails(ctx, t); err != nil {
 		return nil, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
@@ -313,7 +314,7 @@ func (s *TenantsService) ActivateAfterRegistration(ctx context.Context, id uuid.
 	if t.ActivatedAt == nil {
 		t.ActivatedAt = &now
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	if err := s.repo.SaveRegistrationActivation(ctx, t); err != nil {
 		return nil, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
@@ -450,7 +451,7 @@ func (s *TenantsService) ReissueOwnerOTP(ctx context.Context, id uuid.UUID) (str
 		if t.OwnerEmail == "" {
 			t.OwnerEmail = email
 		}
-		if err := s.repo.Save(ctx, t); err != nil {
+		if err := s.repo.SaveOwnerLink(ctx, t); err != nil {
 			return "", err
 		}
 	}

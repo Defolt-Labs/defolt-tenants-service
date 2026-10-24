@@ -3,7 +3,8 @@ module defolt-tenants-service
 go 1.26.0
 
 require (
-	github.com/Defolt-Labs/defolt-httpkit v1.20.1
+	github.com/Defolt-Labs/defolt-httpkit v1.21.0
+	github.com/Defolt-Labs/defolt-svckit v1.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/validator/v10 v10.27.0
 	github.com/google/uuid v1.6.0
@@ -56,5 +57,5 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
-	google.golang.org/protobuf v1.36.9 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )

@@ -3,11 +3,12 @@ package config
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	hk "github.com/Defolt-Labs/defolt-httpkit"
+	"github.com/Defolt-Labs/defolt-svckit/envx"
+	"github.com/Defolt-Labs/defolt-svckit/localmode"
 )
 
 type Config struct {
@@ -63,42 +64,42 @@ func Load() (*Config, error) {
 		}
 	}
 
-	reserved := strings.Split(getStr("RESERVED_SLUGS", "www,api,app,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat,shop,staging,secrets,s3,registry,vps"), ",")
+	reserved := strings.Split(envx.String("RESERVED_SLUGS", "www,api,app,admin,staff,ci,grafana,docs,tempo,loki,mail,webmail,billing,tenants,drs,mt,uat,shop,staging,secrets,s3,registry,vps"), ",")
 	for i, r := range reserved {
 		reserved[i] = strings.TrimSpace(r)
 	}
 
 	c := &Config{
-		ServiceName:      getStr("SERVICE_NAME", "defolt-tenants-service"),
-		ServiceVersion:   getStr("SERVICE_VERSION", "v0.1.0"),
-		Environment:      getStr("ENVIRONMENT", "development"),
-		PublicRootDomain: getStr("PUBLIC_ROOT_DOMAIN", "uat.defoltlabs.com"),
-		ServerPort:       getStr("SERVER_PORT", "8080"),
+		ServiceName:      envx.String("SERVICE_NAME", "defolt-tenants-service"),
+		ServiceVersion:   envx.String("SERVICE_VERSION", "v0.1.0"),
+		Environment:      envx.String("ENVIRONMENT", "development"),
+		PublicRootDomain: envx.String("PUBLIC_ROOT_DOMAIN", "uat.defoltlabs.com"),
+		ServerPort:       envx.String("SERVER_PORT", "8080"),
 
-		DBHost:     getStr("DB_HOST", "defolt-postgres"),
-		DBPort:     getStr("DB_PORT", "5432"),
-		DBName:     getStr("DB_NAME", "defolt_tenants"),
-		DBUser:     getStr("DB_USER", "defolt_tenants"),
-		DBPassword: getStr("DEFOLT_TENANTS_DB_PASSWORD", ""),
-		DBSSLMode:  getStr("DB_SSLMODE", "disable"),
+		DBHost:     envx.String("DB_HOST", "defolt-postgres"),
+		DBPort:     envx.String("DB_PORT", "5432"),
+		DBName:     envx.String("DB_NAME", "defolt_tenants"),
+		DBUser:     envx.String("DB_USER", "defolt_tenants"),
+		DBPassword: envx.String("DEFOLT_TENANTS_DB_PASSWORD", ""),
+		DBSSLMode:  envx.String("DB_SSLMODE", "disable"),
 
-		MaxOpenConns:    getInt("DB_MAX_OPEN_CONNS", 10),
-		MaxIdleConns:    getInt("DB_MAX_IDLE_CONNS", 3),
-		ConnMaxLifetime: time.Duration(getInt("DB_CONN_MAX_LIFETIME_MIN", 15)) * time.Minute,
+		MaxOpenConns:    envx.Int("DB_MAX_OPEN_CONNS", 10),
+		MaxIdleConns:    envx.Int("DB_MAX_IDLE_CONNS", 3),
+		ConnMaxLifetime: time.Duration(envx.Int("DB_CONN_MAX_LIFETIME_MIN", 15)) * time.Minute,
 
-		NatsURL:            getStr("NATS_URL", "nats://defolt-nats:4222"),
-		OutboundServiceKey: getStr("DEFOLT_INTERNAL_SERVICE_KEY", getStr("INTERNAL_SERVICE_KEY", "")),
-		AutoMigrate:        getBool("AUTO_MIGRATE", true),
-		LocalMode:          getBool("LOCAL_MODE", false),
+		NatsURL:            envx.String("NATS_URL", "nats://defolt-nats:4222"),
+		OutboundServiceKey: envx.String("DEFOLT_INTERNAL_SERVICE_KEY", envx.String("INTERNAL_SERVICE_KEY", "")),
+		AutoMigrate:        envx.Bool("AUTO_MIGRATE", true),
+		LocalMode:          envx.Bool("LOCAL_MODE", false),
 
-		RedisURL:      getStr("REDIS_URL", "redis://defolt-redis:6379"),
+		RedisURL:      envx.String("REDIS_URL", "redis://defolt-redis:6379"),
 		ReservedSlugs: reserved,
 
-		TurnstileSecret: getStr("TURNSTILE_SECRET", ""),
-		IdentityURL:     getStr("DEFOLT_IDENTITY_URL", "http://defolt-identity-service:8080"),
-		DefaultPlatform: getStr("DEFAULT_PLATFORM", "drs"),
+		TurnstileSecret: envx.String("TURNSTILE_SECRET", ""),
+		IdentityURL:     envx.String("DEFOLT_IDENTITY_URL", "http://defolt-identity-service:8080"),
+		DefaultPlatform: envx.String("DEFAULT_PLATFORM", "drs"),
 
-		BillingURL: getStr("DEFOLT_BILLING_URL", "http://defolt-billing-service:8080"),
+		BillingURL: envx.String("DEFOLT_BILLING_URL", "http://defolt-billing-service:8080"),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -109,7 +110,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("INTERNAL_SERVICE_KEYS: %w", err)
 	}
 	c.InternalKeys = set
-	if err := c.CheckLocalMode(); err != nil {
+	if err := localmode.Check(c.LocalMode, c.Environment, c.DBHost, ""); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -137,30 +138,4 @@ func (c *Config) Validate() error {
 func (c *Config) DSN() string {
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
 		c.DBHost, c.DBPort, c.DBUser, c.DBPassword, c.DBName, c.DBSSLMode)
-}
-
-func getStr(k, def string) string {
-	if v, ok := os.LookupEnv(k); ok && v != "" {
-		return v
-	}
-	return def
-}
-func getInt(k string, def int) int {
-	if v, ok := os.LookupEnv(k); ok && v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
-func getBool(k string, def bool) bool {
-	if v, ok := os.LookupEnv(k); ok && v != "" {
-		switch strings.ToLower(v) {
-		case "1", "true", "yes", "on":
-			return true
-		case "0", "false", "no", "off":
-			return false
-		}
-	}
-	return def
 }

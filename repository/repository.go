@@ -85,9 +85,55 @@ func (r *Repo) FindPendingByContactEmail(ctx context.Context, email, product str
 	return &t, err
 }
 
-// Save persists mutations on an existing tenant row.
-func (r *Repo) Save(ctx context.Context, t *model.Tenant) error {
-	return r.db.WithContext(ctx).Save(t).Error
+// SaveDetails updates only name, contact_email, phone and plan, the fields an edit changes.
+func (r *Repo) SaveDetails(ctx context.Context, t *model.Tenant) error {
+	return r.saveDetailsQuery(ctx, t).Error
+}
+
+func (r *Repo) saveDetailsQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
+		Select("name", "contact_email", "phone", "plan").
+		Updates(t)
+}
+
+// SaveName updates only name.
+func (r *Repo) SaveName(ctx context.Context, t *model.Tenant) error {
+	return r.saveNameQuery(ctx, t).Error
+}
+
+func (r *Repo) saveNameQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).Select("name").Updates(t)
+}
+
+// SavePhone updates only phone.
+func (r *Repo) SavePhone(ctx context.Context, t *model.Tenant) error {
+	return r.savePhoneQuery(ctx, t).Error
+}
+
+func (r *Repo) savePhoneQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).Select("phone").Updates(t)
+}
+
+// SaveOwnerLink updates only owner_user_id and owner_email, the pair a by-email lookup fills in.
+func (r *Repo) SaveOwnerLink(ctx context.Context, t *model.Tenant) error {
+	return r.saveOwnerLinkQuery(ctx, t).Error
+}
+
+func (r *Repo) saveOwnerLinkQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
+		Select("owner_user_id", "owner_email").
+		Updates(t)
+}
+
+// SaveRegistrationActivation updates only status, activated_at and the trial window.
+func (r *Repo) SaveRegistrationActivation(ctx context.Context, t *model.Tenant) error {
+	return r.saveRegistrationActivationQuery(ctx, t).Error
+}
+
+func (r *Repo) saveRegistrationActivationQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
+		Select("status", "activated_at", "trial_starts_at", "trial_ends_at").
+		Updates(t)
 }
 
 // SaveActivation updates only status and activated_at, so an owner written since the row was read survives.

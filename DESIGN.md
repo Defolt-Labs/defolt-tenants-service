@@ -20,6 +20,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 ## Data rules
 - Slug: lowercase letters, digits and hyphens, unique per product; a reserved slug (config `RESERVED_SLUGS`) is refused.
 - Product: the Defolt product namespace (drs, health); slug lookups are scoped by it, default drs.
+- Validation errors name the json field: server wiring calls `hk.RegisterJSONFieldNames()` first, and handler tests call it in `TestMain`.
 - Phone: normalised to international form; an unclear country is refused.
 - Status flow: pending_payment, then active; grace and suspended follow billing; archived hides the tenant from resolve-host.
 - Trial: seven days from activation.
@@ -29,6 +30,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`. The inbound keys are `INTERNAL_SERVICE_KEYS`, a `name=key,name=key` set, built with the httpkit key set: when it is set only its entries are accepted, else the single key is accepted whole under the name `legacy`. Boot stops on a malformed set, naming the entry by position and never a value. The matched name is stamped on the request.
 - Signup without a passing Turnstile check: 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`.
 - The health product refuses a tenant with no owner: 400 `DL_TENANT_OWNER_REQUIRED`.
+- `/ready` pings the database through `hk.Readiness`: 503 `db_unreachable` when it cannot answer in 2 seconds; `/health` stays a plain liveness answer.
 - Every refusal carries English and Kiswahili text.
 
 ## Events
@@ -57,6 +59,6 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Route paths and reply codes change by addition only.
 - The service never boots without an outbound internal key (the single inbound key too, unless a named set is given); the refusal names the variables, never a value (config_test.go).
 - A connection URL that will not parse is logged as a fixed sentence, never the parse error, which repeats the password (cache_test.go, nats_err_test.go).
-- Activation and billing sync write only `status` and `activated_at`; an owner written since the row was read survives (repository_test.go).
+- Every write to an existing tenant names its columns: an edit writes name, contact email, phone and plan; registration activation writes status, activated_at and the trial window; billing sync writes status and activated_at; a signup resume writes name or phone; an owner lookup writes owner_user_id and owner_email. There is no whole-row save, so a column changed since the row was read survives (repository_test.go).
 - The outbound header is never the inbound set (config_test.go).
-- LOCAL_MODE refuses a non-loopback database host and a production environment, and starts neither sweep (local_mode_test.go).
+- LOCAL_MODE refuses a non-loopback database host and a production environment (config_test.go), and runs the svckit local plan: no migration, no NATS connection, no sweep.

@@ -17,12 +17,12 @@ Rules shared by every route, stated once:
 - Refuses: nothing.
 
 ### GET /ready
-- Handler: Health
+- Handler: Readiness (httpkit)
 - Who may call: anyone, no key. Readiness probe.
 - In: nothing.
-- Out: same as `GET /health`.
+- Out: 200 `{"status":"ready","nats":"connected|disconnected|absent"}` after the database answered a ping within 2 seconds. Not the envelope.
 - Saves: nothing.
-- Refuses: nothing.
+- Refuses: 503 `{"status":"db_unreachable"}` when the ping fails or is slow; the error goes to the log, never the body.
 
 ### GET /tenants/v1/by-slug/:slug
 - Handler: GetBySlug

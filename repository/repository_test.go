@@ -64,3 +64,75 @@ func TestSaveActivationWritesOnlyStatusAndActivatedAt(t *testing.T) {
 		}
 	}
 }
+
+// writtenColumns answers the SET clause of the statement a Save* method would run, without a database.
+func writtenColumns(t *testing.T, build func(r *Repo, tn *model.Tenant) *gorm.DB) string {
+	t.Helper()
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: "host=127.0.0.1 user=dryrun dbname=dryrun sslmode=disable"}),
+		&gorm.Config{DryRun: true, DisableAutomaticPing: true, SkipDefaultTransaction: true})
+	if err != nil {
+		t.Fatalf("open dry-run gorm: %v", err)
+	}
+	owner := uuid.New()
+	existed := true
+	now := time.Now()
+	tn := &model.Tenant{
+		ID: uuid.New(), Slug: "s", Name: "n", ContactEmail: "c@example.com", Phone: "+255712345678", Plan: "standard",
+		Status: model.StatusActive, OwnerUserID: &owner, OwnerEmail: "o@example.com", OwnerFirstName: "A",
+		OwnerMiddleName: "B", OwnerLastName: "C", OwnerExisted: &existed, ActivatedAt: &now, TrialStartsAt: &now, TrialEndsAt: &now,
+	}
+	q := build(New(db), tn)
+	if q.Error != nil {
+		t.Fatalf("dry-run: %v", q.Error)
+	}
+	sql := q.Statement.SQL.String()
+	t.Logf("SQL: %s", sql)
+	return sql[strings.Index(sql, "SET"):strings.Index(sql, "WHERE")]
+}
+
+// assertOnlyColumns fails when the SET clause names a column outside want, or misses one in it.
+func assertOnlyColumns(t *testing.T, set string, want ...string) {
+	t.Helper()
+	all := []string{"slug", "name", "contact_email", "phone", "currency", "timezone", "country_code", "product", "plan", "status",
+		"owner_user_id", "owner_email", "owner_first_name", "owner_middle_name", "owner_last_name", "owner_existed",
+		"activated_at", "trial_starts_at", "trial_ends_at", "created_at", "deleted_at"}
+	wanted := map[string]bool{"updated_at": true}
+	for _, c := range want {
+		wanted[c] = true
+		if !strings.Contains(set, `"`+c+`"`) {
+			t.Errorf("does not write %s; SET = %s", c, set)
+		}
+	}
+	for _, c := range all {
+		if !wanted[c] && strings.Contains(set, `"`+c+`"`) {
+			t.Errorf("writes %s, which the path does not change; SET = %s", c, set)
+		}
+	}
+}
+
+func TestSaveDetailsWritesOnlyTheEditableColumns(t *testing.T) {
+	set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB { return r.saveDetailsQuery(context.Background(), tn) })
+	assertOnlyColumns(t, set, "name", "contact_email", "phone", "plan")
+}
+
+func TestSaveNameWritesOnlyName(t *testing.T) {
+	set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB { return r.saveNameQuery(context.Background(), tn) })
+	assertOnlyColumns(t, set, "name")
+}
+
+func TestSavePhoneWritesOnlyPhone(t *testing.T) {
+	set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB { return r.savePhoneQuery(context.Background(), tn) })
+	assertOnlyColumns(t, set, "phone")
+}
+
+func TestSaveOwnerLinkWritesOnlyTheOwnerIDAndEmail(t *testing.T) {
+	set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB { return r.saveOwnerLinkQuery(context.Background(), tn) })
+	assertOnlyColumns(t, set, "owner_user_id", "owner_email")
+}
+
+func TestSaveRegistrationActivationWritesOnlyStatusAndTheTrialWindow(t *testing.T) {
+	set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB {
+		return r.saveRegistrationActivationQuery(context.Background(), tn)
+	})
+	assertOnlyColumns(t, set, "status", "activated_at", "trial_starts_at", "trial_ends_at")
+}

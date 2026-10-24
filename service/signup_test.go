@@ -69,6 +69,8 @@ const (
 	logInsert   = "insert"
 	logIdentity = "identity CreateUser"
 	logOwner    = "SaveOwner"
+	logName     = "SaveName"
+	logPhone    = "SavePhone"
 	logCreated  = "publish tenant.created"
 	logCheckout = "billing checkout"
 )
@@ -113,9 +115,20 @@ func (r *recordingRows) FindBySlug(_ context.Context, product, slug string) (*mo
 	return &cp, nil
 }
 
-func (r *recordingRows) Save(_ context.Context, t *model.Tenant) error {
-	r.log.add("Save")
-	r.byID[t.ID] = *t
+// SaveName and SavePhone write one column each into the stored row, as the repository does.
+func (r *recordingRows) SaveName(_ context.Context, t *model.Tenant) error {
+	r.log.add(logName)
+	stored := r.byID[t.ID]
+	stored.Name = t.Name
+	r.byID[t.ID] = stored
+	return nil
+}
+
+func (r *recordingRows) SavePhone(_ context.Context, t *model.Tenant) error {
+	r.log.add(logPhone)
+	stored := r.byID[t.ID]
+	stored.Phone = t.Phone
+	r.byID[t.ID] = stored
 	return nil
 }
 
@@ -315,6 +328,35 @@ func TestResumedSignupPublishesOnce(t *testing.T) {
 	}
 	assertCreatedAfterOwnerBeforeCheckout(t, rig.log)
 	assertPayloadUnchanged(t, rig.log, existing)
+}
+
+// A resumed signup that renames the clinic and changes the phone writes those two columns only: a plan or
+// contact email changed on the stored row since the signup read it survives.
+func TestResumedSignupWritesOnlyTheNameAndPhone(t *testing.T) {
+	rig := newOrderRig(t, http.StatusCreated)
+	read := &model.Tenant{
+		ID: uuid.New(), Slug: "order-resume-2", Name: "Old Name", ContactEmail: "owner-order@example.com",
+		Phone: "+255797140801", Product: "health", Plan: "standard", Status: model.StatusPendingPayment,
+	}
+	stored := *read
+	stored.Plan = "premium"
+	rig.rows.insertTaken = true
+	rig.rows.existing = read
+	rig.rows.byID[read.ID] = stored
+
+	if _, err := rig.svc.resumeStalledSignup(context.Background(), signupInput("health", "order-resume-2")); err != nil {
+		t.Fatalf("resumeStalledSignup: %v", err)
+	}
+	if rig.log.count(logName) != 1 || rig.log.count(logPhone) != 1 {
+		t.Fatalf("log = %v, want one SaveName and one SavePhone", rig.log.snapshot())
+	}
+	got := rig.rows.byID[read.ID]
+	if got.Name != "Order Test Clinic" || got.Phone != "+255797140800" {
+		t.Fatalf("name %q phone %q, want the signup's values", got.Name, got.Phone)
+	}
+	if got.Plan != "premium" {
+		t.Fatalf("plan = %q, want the stored premium to survive", got.Plan)
+	}
 }
 
 // (e) Control: the internal POST /tenants route publishes tenant.created
