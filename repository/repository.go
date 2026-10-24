@@ -90,6 +90,18 @@ func (r *Repo) Save(ctx context.Context, t *model.Tenant) error {
 	return r.db.WithContext(ctx).Save(t).Error
 }
 
+// SaveActivation updates only status and activated_at, so an owner written since the row was read survives.
+func (r *Repo) SaveActivation(ctx context.Context, t *model.Tenant) error {
+	return r.saveActivationQuery(ctx, t).Error
+}
+
+// saveActivationQuery constructs the partial update query for status and activated_at.
+func (r *Repo) saveActivationQuery(ctx context.Context, t *model.Tenant) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&model.Tenant{ID: t.ID}).
+		Select("status", "activated_at").
+		Updates(t)
+}
+
 // SaveOwner updates only the owner fields on the tenant.
 func (r *Repo) SaveOwner(ctx context.Context, t *model.Tenant) error {
 	return r.saveOwnerQuery(ctx, t).Error

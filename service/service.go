@@ -365,7 +365,7 @@ func (s *TenantsService) ActivateExploring(ctx context.Context, id uuid.UUID) (*
 	if t.ActivatedAt == nil {
 		t.ActivatedAt = &now
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	if err := s.repo.SaveActivation(ctx, t); err != nil {
 		return nil, false, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
@@ -408,7 +408,7 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 		now := time.Now()
 		t.ActivatedAt = &now
 	}
-	if err := s.repo.Save(ctx, t); err != nil {
+	if err := s.repo.SaveActivation(ctx, t); err != nil {
 		return nil, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
