@@ -110,9 +110,23 @@ func assertOnlyColumns(t *testing.T, set string, want ...string) {
 	}
 }
 
-func TestSaveDetailsWritesOnlyTheEditableColumns(t *testing.T) {
-	set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB { return r.saveDetailsQuery(context.Background(), tn) })
-	assertOnlyColumns(t, set, "name", "contact_email", "phone", "plan")
+func TestSaveDetailsWritesOnlyTheNamedColumns(t *testing.T) {
+	for _, cols := range [][]string{{"name"}, {"plan"}, {"phone", "contact_email"}, {"name", "contact_email", "phone", "plan"}} {
+		set := writtenColumns(t, func(r *Repo, tn *model.Tenant) *gorm.DB { return r.saveDetailsQuery(context.Background(), tn, cols) })
+		assertOnlyColumns(t, set, cols...)
+	}
+}
+
+func TestSaveDetailsRefusesAColumnOutsideTheEditableSet(t *testing.T) {
+	if checkEditColumns([]string{"name", "status"}) == nil {
+		t.Fatal("status accepted as an edit column")
+	}
+	if checkEditColumns(nil) == nil {
+		t.Fatal("an edit with no columns was accepted")
+	}
+	if err := checkEditColumns([]string{"name", "plan"}); err != nil {
+		t.Fatalf("editable columns refused: %v", err)
+	}
 }
 
 func TestSaveNameWritesOnlyName(t *testing.T) {

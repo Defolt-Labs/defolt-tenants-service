@@ -219,33 +219,14 @@ func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInpu
 	if err != nil {
 		return nil, err
 	}
-	changed := false
-	if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
-		t.Name = strings.TrimSpace(*in.Name)
-		changed = true
+	columns, err := applyUpdate(t, in)
+	if err != nil {
+		return nil, err
 	}
-	if in.ContactEmail != nil && strings.TrimSpace(*in.ContactEmail) != "" {
-		t.ContactEmail = strings.TrimSpace(*in.ContactEmail)
-		changed = true
-	}
-	if in.Phone != nil {
-		p, err := RequirePhone(*in.Phone)
-		if err != nil {
-			return nil, err
-		}
-		if p != t.Phone {
-			t.Phone = p
-			changed = true
-		}
-	}
-	if in.Plan != nil && strings.TrimSpace(*in.Plan) != "" {
-		t.Plan = strings.TrimSpace(*in.Plan)
-		changed = true
-	}
-	if !changed {
+	if len(columns) == 0 {
 		return t, nil
 	}
-	if err := s.repo.SaveDetails(ctx, t); err != nil {
+	if err := s.repo.SaveDetails(ctx, t, columns...); err != nil {
 		return nil, err
 	}
 	s.cache.InvalidateSlug(ctx, t.Product, t.Slug)
@@ -255,6 +236,34 @@ func (s *TenantsService) Update(ctx context.Context, id uuid.UUID, in UpdateInpu
 		"plan":      t.Plan,
 	})
 	return t, nil
+}
+
+// applyUpdate sets the fields the request carries on t and names the columns it changed.
+func applyUpdate(t *model.Tenant, in UpdateInput) ([]string, error) {
+	var columns []string
+	if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
+		t.Name = strings.TrimSpace(*in.Name)
+		columns = append(columns, "name")
+	}
+	if in.ContactEmail != nil && strings.TrimSpace(*in.ContactEmail) != "" {
+		t.ContactEmail = strings.TrimSpace(*in.ContactEmail)
+		columns = append(columns, "contact_email")
+	}
+	if in.Phone != nil {
+		p, err := RequirePhone(*in.Phone)
+		if err != nil {
+			return nil, err
+		}
+		if p != t.Phone {
+			t.Phone = p
+			columns = append(columns, "phone")
+		}
+	}
+	if in.Plan != nil && strings.TrimSpace(*in.Plan) != "" {
+		t.Plan = strings.TrimSpace(*in.Plan)
+		columns = append(columns, "plan")
+	}
+	return columns, nil
 }
 
 // Suspend transitions tenant status to suspended.
