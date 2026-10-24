@@ -30,6 +30,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`. The inbound keys are `INTERNAL_SERVICE_KEYS`, a `name=key,name=key` set, built with the httpkit key set: when it is set only its entries are accepted, else the single key is accepted whole under the name `legacy`. Boot stops on a malformed set, naming the entry by position and never a value. The matched name is stamped on the request.
 - Signup without a passing Turnstile check: 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`.
 - The health product refuses a tenant with no owner: 400 `DL_TENANT_OWNER_REQUIRED`.
+- `/ready` pings the database through `hk.Readiness`: 503 `db_unreachable` when it cannot answer in 2 seconds; `/health` stays a plain liveness answer.
 - Every refusal carries English and Kiswahili text.
 
 ## Events

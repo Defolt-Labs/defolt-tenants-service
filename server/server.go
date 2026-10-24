@@ -86,7 +86,9 @@ func Initialize() (*App, error) {
 	engine := gin.New()
 	engine.Use(gin.Recovery(), middleware.CORS(), middleware.RequestID())
 
-	routes.Mount(routes.Config{Engine: engine, Config: cfg, Handlers: h})
+	hk.ReadinessFailedLog = func(err error) { logger.LogWarn("", "ready", "database ping failed: "+err.Error()) }
+	ready := hk.Readiness(dbPing(db), natsState(nc))
+	routes.Mount(routes.Config{Engine: engine, Config: cfg, Handlers: h, Ready: ready})
 
 	app := &App{Config: cfg, Engine: engine, DB: db, NC: nc, Cache: rc}
 	// LOCAL_MODE leaves the sweeps to the UAT pods: they delete and activate tenant rows.
@@ -95,6 +97,31 @@ func Initialize() (*App, error) {
 		app.startExploreActivator(svc)
 	}
 	return app, nil
+}
+
+// dbPing pings the pool behind the GORM handle.
+func dbPing(db *gorm.DB) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.PingContext(ctx)
+	}
+}
+
+// natsState names the bus state for /ready: connected, disconnected, or absent when this run has no connection.
+func natsState(nc *nats.Conn) func() string {
+	return func() string {
+		switch {
+		case nc == nil:
+			return "absent"
+		case nc.IsConnected():
+			return "connected"
+		default:
+			return "disconnected"
+		}
+	}
 }
 
 // startSweeper reaps abandoned pending_payment signups one minute after boot, then every 15 minutes.

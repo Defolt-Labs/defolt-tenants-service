@@ -13,11 +13,13 @@ type Config struct {
 	Engine   *gin.Engine
 	Config   *config.Config
 	Handlers *handler.Handlers
+	// Ready answers /ready; it pings the database.
+	Ready gin.HandlerFunc
 }
 
 // Mount mounts probe routes and API versions.
 func Mount(cfg Config) {
-	MountProbes(cfg.Engine, cfg.Handlers)
+	MountProbes(cfg.Engine, cfg.Handlers, cfg.Ready)
 
 	v1.Register(v1.Config{
 		Engine:   cfg.Engine,
@@ -27,10 +29,10 @@ func Mount(cfg Config) {
 }
 
 // MountProbes mounts health and readiness endpoints.
-func MountProbes(engine *gin.Engine, h *handler.Handlers) {
+func MountProbes(engine *gin.Engine, h *handler.Handlers, ready gin.HandlerFunc) {
 	if engine == nil {
 		return
 	}
 	engine.GET("/health", h.Health)
-	engine.GET("/ready", h.Health)
+	engine.GET("/ready", ready)
 }
