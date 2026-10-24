@@ -58,7 +58,7 @@ func Initialize() (*App, error) {
 
 	nc, err := nats.Connect(cfg.NatsURL, nats.Name("defolt-tenants-service"))
 	if err != nil {
-		logger.LogWarn("", "nats", "could not connect to NATS: "+err.Error())
+		logger.LogWarn("", "nats", "could not connect to NATS: "+natsConnectErrText(err))
 		nc = nil
 	}
 
