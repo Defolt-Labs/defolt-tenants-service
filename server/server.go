@@ -15,6 +15,8 @@ import (
 	"defolt-tenants-service/routes"
 	"defolt-tenants-service/service"
 
+	hk "github.com/Defolt-Labs/defolt-httpkit"
+	"github.com/Defolt-Labs/defolt-svckit/localmode"
 	"github.com/gin-gonic/gin"
 	"github.com/nats-io/nats.go"
 	"gorm.io/gorm"
@@ -40,6 +42,7 @@ type App struct {
 }
 
 func Initialize() (*App, error) {
+	hk.RegisterJSONFieldNames()
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -49,18 +52,21 @@ func Initialize() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan := planBoot(cfg.LocalMode)
+	plan := localmode.Plan(cfg.LocalMode)
 	if cfg.LocalMode {
-		logger.LogWarn("", "local-mode", localBanner())
+		logger.LogWarn("", "local-mode", plan.Banner())
 	}
 	if plan.Migrate {
 		database.EnsureSchema(db, cfg)
 	}
 
-	nc, err := nats.Connect(cfg.NatsURL, nats.Name("defolt-tenants-service"))
-	if err != nil {
-		logger.LogWarn("", "nats", "could not connect to NATS: "+natsConnectErrText(err))
-		nc = nil
+	var nc *nats.Conn
+	if plan.NATS {
+		nc, err = nats.Connect(cfg.NatsURL, nats.Name("defolt-tenants-service"))
+		if err != nil {
+			logger.LogWarn("", "nats", "could not connect to NATS: "+natsConnectErrText(err))
+			nc = nil
+		}
 	}
 
 	// Shared Redis: slug-lookup cache (30s TTL) + Idempotency-Key

@@ -124,3 +124,34 @@ func TestLoadRefusesAMalformedNamedSetWithoutRepeatingIt(t *testing.T) {
 		}
 	}
 }
+
+// Load runs the local-mode check, so LOCAL_MODE=true with a cluster database host never reaches a pool.
+func TestLoadRefusesLocalModeOnClusterHost(t *testing.T) {
+	clearKeys(t)
+	t.Setenv("INTERNAL_SERVICE_KEY", "k")
+	t.Setenv("LOCAL_MODE", "true")
+	t.Setenv("ENVIRONMENT", "local")
+	t.Setenv("DB_HOST", "defolt-postgres")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "LOCAL_MODE refused") {
+		t.Fatalf("Load: err %v, want LOCAL_MODE refused", err)
+	}
+	t.Setenv("DB_HOST", "127.0.0.1")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load on loopback: %v", err)
+	}
+	if !c.LocalMode {
+		t.Fatal("LOCAL_MODE=true did not set LocalMode")
+	}
+}
+
+func TestLoadRefusesLocalModeOnProduction(t *testing.T) {
+	clearKeys(t)
+	t.Setenv("INTERNAL_SERVICE_KEY", "k")
+	t.Setenv("LOCAL_MODE", "true")
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("DB_HOST", "127.0.0.1")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "production") {
+		t.Fatalf("Load: err %v, want a production refusal", err)
+	}
+}

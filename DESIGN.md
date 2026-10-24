@@ -20,6 +20,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 ## Data rules
 - Slug: lowercase letters, digits and hyphens, unique per product; a reserved slug (config `RESERVED_SLUGS`) is refused.
 - Product: the Defolt product namespace (drs, health); slug lookups are scoped by it, default drs.
+- Validation errors name the json field: server wiring calls `hk.RegisterJSONFieldNames()` first, and handler tests call it in `TestMain`.
 - Phone: normalised to international form; an unclear country is refused.
 - Status flow: pending_payment, then active; grace and suspended follow billing; archived hides the tenant from resolve-host.
 - Trial: seven days from activation.
@@ -59,4 +60,4 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - A connection URL that will not parse is logged as a fixed sentence, never the parse error, which repeats the password (cache_test.go, nats_err_test.go).
 - Activation and billing sync write only `status` and `activated_at`; an owner written since the row was read survives (repository_test.go).
 - The outbound header is never the inbound set (config_test.go).
-- LOCAL_MODE refuses a non-loopback database host and a production environment, and starts neither sweep (local_mode_test.go).
+- LOCAL_MODE refuses a non-loopback database host and a production environment (config_test.go), and runs the svckit local plan: no migration, no NATS connection, no sweep.

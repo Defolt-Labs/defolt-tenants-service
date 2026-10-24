@@ -9,8 +9,6 @@ import (
 	"defolt-tenants-service/response"
 	"defolt-tenants-service/service"
 
-	// httpkit registers json tag names on gin's validator when imported, so fe.Field() is already the json name.
-	_ "github.com/Defolt-Labs/defolt-httpkit"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 )
@@ -20,7 +18,7 @@ type signupFieldDetails struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// writeSignupBindError translates request binding failures to localized responses.
+// writeSignupBindError translates request binding failures to localized responses; fe.Field() is the json name because server wiring registers the json tag names at boot.
 func writeSignupBindError(c *gin.Context, err error) {
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) && len(ve) > 0 {
