@@ -26,7 +26,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Soft delete via `deleted_at`; abandoned signups are deleted for good after retention.
 
 ## Refusals
-- Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`. The inbound value is a bare key or a `name=key,name=key` set; each named entry is accepted and the matched name is stamped on the request.
+- Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`. The inbound keys are `INTERNAL_SERVICE_KEYS`, a `name=key,name=key` set, built with the httpkit key set: when it is set only its entries are accepted, else the single key is accepted whole under the name `legacy`. Boot stops on a malformed set, naming the entry by position and never a value. The matched name is stamped on the request.
 - Signup without a passing Turnstile check: 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`.
 - The health product refuses a tenant with no owner: 400 `DL_TENANT_OWNER_REQUIRED`.
 - Every refusal carries English and Kiswahili text.
@@ -34,12 +34,13 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 ## Events
 - Published after the row is saved; a failed publish is dropped, never blocks the request.
 - `tenant.activated` carries the owner and product so downstream services can provision.
+- `tenant.created` and `tenant.activated` carry the `request_id` of the request that caused them.
 - Nothing is consumed.
 
 ## Upstream calls
 - defolt-identity-service: create or find the owner, reset the owner password.
 - defolt-billing-service: registration checkout and payment link.
-- Both are called with one outbound key, `DEFOLT_INTERNAL_SERVICE_KEY` else `INTERNAL_SERVICE_KEY`; `INTERNAL_SERVICE_KEYS` is never read for it.
+- Both are called with one outbound key, `DEFOLT_INTERNAL_SERVICE_KEY` else `INTERNAL_SERVICE_KEY`; `INTERNAL_SERVICE_KEYS` is never read for it, and a comma in it stops boot.
 - Cloudflare Turnstile: human check on public signup.
 
 ## The gate
@@ -54,6 +55,8 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - The abandoned-signup sweep refuses to delete a live tenant (`abandonBlocked`).
 - Public routes reveal only id, slug, status and product.
 - Route paths and reply codes change by addition only.
-- The service never boots without both an inbound and an outbound internal key; the refusal names the variables, never a value (config_test.go).
+- The service never boots without an outbound internal key (the single inbound key too, unless a named set is given); the refusal names the variables, never a value (config_test.go).
+- A connection URL that will not parse is logged as a fixed sentence, never the parse error, which repeats the password (cache_test.go, nats_err_test.go).
+- Activation and billing sync write only `status` and `activated_at`; an owner written since the row was read survives (repository_test.go).
 - The outbound header is never the inbound set (config_test.go).
 - LOCAL_MODE refuses a non-loopback database host and a production environment, and starts neither sweep (local_mode_test.go).

@@ -37,8 +37,8 @@ Against the UAT stores through the tunnel, `LOCAL_MODE=true` (set by `office/too
 
 ## Internal keys
 
-- Inbound: `INTERNAL_SERVICE_KEYS` (a `name=key` set), else `DEFOLT_INTERNAL_SERVICE_KEY`, else `INTERNAL_SERVICE_KEY`.
-- Outbound, sent to identity and billing: `DEFOLT_INTERNAL_SERVICE_KEY`, else `INTERNAL_SERVICE_KEY`. Always one key, never the set.
+- Inbound: `INTERNAL_SERVICE_KEYS` (a `name=key` set; when set it is the only thing accepted, and a malformed set stops boot), else the outbound key below, taken whole.
+- Outbound, sent to identity and billing: `DEFOLT_INTERNAL_SERVICE_KEY`, else `INTERNAL_SERVICE_KEY`. Always one key, never the set; a comma in it stops boot.
 
 ## Modules
 
