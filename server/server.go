@@ -74,7 +74,7 @@ func Initialize() (*App, error) {
 	rc := cache.Connect(cfg.RedisURL)
 
 	repo := repository.New(db)
-	ts := service.NewTurnstile(cfg.TurnstileSecret, cfg.Environment)
+	ts := service.NewTurnstile(cfg.TurnstileSecret, cfg.DeclaredEnvironment())
 	idClient := service.NewIdentityClient(cfg.IdentityURL, cfg.OutboundServiceKey, cfg.DefaultPlatform)
 	billing := service.NewBillingClient(cfg.BillingURL, cfg.OutboundServiceKey)
 	svc := service.New(repo, nc, rc, idClient, billing, cfg.ReservedSlugs, cfg.PublicRootDomain)

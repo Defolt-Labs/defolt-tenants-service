@@ -15,6 +15,8 @@ type Config struct {
 	ServiceName    string
 	ServiceVersion string
 	Environment    string
+	// EnvironmentSet is true only when ENVIRONMENT was given; the "development" default must never switch a safety check off.
+	EnvironmentSet bool
 	// PublicRootDomain is the shared DNS root for customer-facing hosts.
 	PublicRootDomain string
 	ServerPort       string
@@ -73,6 +75,7 @@ func Load() (*Config, error) {
 		ServiceName:      envx.String("SERVICE_NAME", "defolt-tenants-service"),
 		ServiceVersion:   envx.String("SERVICE_VERSION", "v0.1.0"),
 		Environment:      envx.String("ENVIRONMENT", "development"),
+		EnvironmentSet:   strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
 		PublicRootDomain: envx.String("PUBLIC_ROOT_DOMAIN", "uat.defoltlabs.com"),
 		ServerPort:       envx.String("SERVER_PORT", "8080"),
 
@@ -114,6 +117,14 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// DeclaredEnvironment is ENVIRONMENT as set, or "" when it was left unset.
+func (c *Config) DeclaredEnvironment() string {
+	if !c.EnvironmentSet {
+		return ""
+	}
+	return c.Environment
 }
 
 func (c *Config) Validate() error {

@@ -155,3 +155,25 @@ func TestLoadRefusesLocalModeOnProduction(t *testing.T) {
 		t.Fatalf("Load: err %v, want a production refusal", err)
 	}
 }
+
+// An unset ENVIRONMENT defaults to development for other uses but must not count as declared, so the human check cannot be skipped by omission.
+func TestDeclaredEnvironment(t *testing.T) {
+	clearKeys(t)
+	t.Setenv("INTERNAL_SERVICE_KEY", "k")
+	t.Setenv("ENVIRONMENT", "")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Environment != "development" || c.DeclaredEnvironment() != "" {
+		t.Fatalf("unset: Environment %q, declared %q, want development and blank", c.Environment, c.DeclaredEnvironment())
+	}
+	t.Setenv("ENVIRONMENT", "development")
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.DeclaredEnvironment() != "development" {
+		t.Fatalf("set: declared %q, want development", c.DeclaredEnvironment())
+	}
+}
