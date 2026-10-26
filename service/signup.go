@@ -105,10 +105,13 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		} else {
 			applyIdentityOwner(t, identityUserID, identityExisted)
 			out.OwnerExisting = identityExisted
-			if !identityExisted && !out.OwnerLink {
-				out.OneTimePassword = identityPassword
-			} else {
+			switch {
+			case identityExisted:
 				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: owner already has a Defolt account, keeping their credential", t.ID))
+			case out.OwnerLink:
+				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: the owner's first password goes as a link from the product's own service", t.ID))
+			default:
+				out.OneTimePassword = identityPassword
 			}
 		}
 		if err := s.rows.SaveOwner(ctx, t); err != nil {

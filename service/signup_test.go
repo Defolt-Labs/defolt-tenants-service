@@ -132,6 +132,13 @@ func (r *recordingRows) SavePhone(_ context.Context, t *model.Tenant) error {
 	return nil
 }
 
+func (r *recordingRows) SaveOwnerLink(_ context.Context, t *model.Tenant) error {
+	stored := r.byID[t.ID]
+	stored.OwnerUserID, stored.OwnerEmail = t.OwnerUserID, t.OwnerEmail
+	r.byID[t.ID] = stored
+	return nil
+}
+
 func (r *recordingRows) SaveOwner(_ context.Context, t *model.Tenant) error {
 	r.log.add(logOwner)
 	r.byID[t.ID] = *t

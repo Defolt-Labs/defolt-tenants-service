@@ -98,6 +98,7 @@ type signupRows interface {
 	SaveName(ctx context.Context, t *model.Tenant) error
 	SavePhone(ctx context.Context, t *model.Tenant) error
 	SaveOwner(ctx context.Context, t *model.Tenant) error
+	SaveOwnerLink(ctx context.Context, t *model.Tenant) error
 }
 
 // CreateInput mirrors the tenant creation payload.
@@ -484,7 +485,7 @@ func (s *TenantsService) ReissueOwnerOTP(ctx context.Context, id uuid.UUID) (str
 		if t.OwnerEmail == "" {
 			t.OwnerEmail = email
 		}
-		if err := s.repo.SaveOwnerLink(ctx, t); err != nil {
+		if err := s.rows.SaveOwnerLink(ctx, t); err != nil {
 			return "", err
 		}
 	}
