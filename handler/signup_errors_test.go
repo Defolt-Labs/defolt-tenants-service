@@ -110,12 +110,13 @@ func assertSentence(t *testing.T, a signupAnswer, h http.Header) {
 }
 
 func TestSignupRefusalsNameTheirReason(t *testing.T) {
-	refused := service.NewTurnstile("real-secret").WithVerifyURL(
+	refused := service.NewTurnstile("real-secret", "production").WithVerifyURL(
 		cloudflare(t, `{"success":false,"error-codes":["invalid-input-response"]}`))
-	badSecret := service.NewTurnstile("real-secret").WithVerifyURL(
+	badSecret := service.NewTurnstile("real-secret", "production").WithVerifyURL(
 		cloudflare(t, `{"success":false,"error-codes":["invalid-input-secret"]}`))
-	unreachable := service.NewTurnstile("real-secret").WithVerifyURL(cloudflare(t, ""))
-	passes := service.NewTurnstile("")
+	unreachable := service.NewTurnstile("real-secret", "production").WithVerifyURL(cloudflare(t, ""))
+	passes := service.NewTurnstile("", "development")
+	noSecret := service.NewTurnstile("", "staging")
 
 	with := func(k string, v any) []byte {
 		b := goodSignup()
@@ -140,6 +141,7 @@ func TestSignupRefusalsNameTheirReason(t *testing.T) {
 		{"a refused token", refused, mustJSON(t, goodSignup()), 403, "DL_SIGNUP_HUMAN_CHECK_FAILED", "turnstile_token", "invalid-input-response"},
 		{"our secret refused", badSecret, mustJSON(t, goodSignup()), 503, "DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE", "turnstile_token", "invalid-input-secret"},
 		{"cloudflare unreachable", unreachable, mustJSON(t, goodSignup()), 503, "DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE", "turnstile_token", ""},
+		{"no secret outside development", noSecret, mustJSON(t, goodSignup()), 503, "DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE", "turnstile_token", "secret-not-configured"},
 		{"no phone", passes, without("phone"), 400, "DL_SIGNUP_FIELD_REQUIRED", "phone", ""},
 		{"no email", passes, without("contact_email"), 400, "DL_SIGNUP_FIELD_REQUIRED", "contact_email", ""},
 		{"a blank first name", passes, with("first_name", "   "), 400, "DL_SIGNUP_FIELD_REQUIRED", "first_name", ""},

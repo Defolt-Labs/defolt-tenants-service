@@ -18,15 +18,24 @@ type Turnstile struct {
 	secret    string
 	verifyURL string
 	http      *http.Client
+	// skip is true only for a blank secret under ENVIRONMENT=development.
+	skip bool
 }
 
 const turnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
-func NewTurnstile(secret string) *Turnstile {
+// NewTurnstile builds the verifier; a blank secret skips the check in development only and refuses public signup everywhere else.
+func NewTurnstile(secret, environment string) *Turnstile {
+	t := &Turnstile{secret: secret, verifyURL: turnstileSiteverifyURL, http: &http.Client{Timeout: 6 * time.Second}}
 	if strings.TrimSpace(secret) == "" {
-		logger.LogWarn("", "turnstile", "TURNSTILE_SECRET unset: CAPTCHA verification DISABLED (public signup unprotected) - acceptable for dev/UAT only, never production")
+		if environment == "development" {
+			t.skip = true
+			logger.LogWarn("", "turnstile", "TURNSTILE_SECRET unset in development: the human check is skipped")
+		} else {
+			logger.LogError("", "turnstile", "TURNSTILE_SECRET unset in "+environment+": public signup is refused until it is set")
+		}
 	}
-	return &Turnstile{secret: secret, verifyURL: turnstileSiteverifyURL, http: &http.Client{Timeout: 6 * time.Second}}
+	return t
 }
 
 // WithVerifyURL overrides the verification endpoint for testing.
@@ -70,7 +79,10 @@ func turnstileSecretFault(codes []string) bool {
 
 func (t *Turnstile) Verify(ctx context.Context, token, remoteIP string) error {
 	if strings.TrimSpace(t.secret) == "" {
-		return nil
+		if t.skip {
+			return nil
+		}
+		return &TurnstileError{Codes: []string{"secret-not-configured"}, base: ErrTurnstileUnavailable}
 	}
 	form := url.Values{
 		"secret":   {t.secret},
