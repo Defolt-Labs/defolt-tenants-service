@@ -146,7 +146,7 @@ var (
 	ErrTenantOwnerLinkElsewhere = struct {
 		Code string
 		Meta Meta
-	}{"DL_TENANT_OWNER_LINK_ELSEWHERE", Meta{EN: "This owner's password link is sent by the clinic's own system. Ask for a new link there; this route does not issue one.", SW: "Kiungo cha nenosiri la mmiliki huyu hutumwa na mfumo wa kliniki yenyewe. Omba kiungo kipya huko; njia hii haitoi kimoja."}}
+	}{"DL_TENANT_OWNER_LINK_ELSEWHERE", Meta{EN: "This owner's password link is sent by the tenant's own service. Ask for a new link there; this route does not issue one.", SW: "Kiungo cha nenosiri la mmiliki huyu hutumwa na huduma ya mteja yenyewe. Omba kiungo kipya huko; njia hii haitoi kimoja."}}
 
 	// ErrTenantOwnerRequired rejects health tenant creation without an owner.
 	ErrTenantOwnerRequired = struct {
