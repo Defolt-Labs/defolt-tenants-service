@@ -34,11 +34,11 @@ Rules shared by every route, stated once:
 
 ### POST /tenants/v1/public/signup
 - Handler: PublicSignup
-- Who may call: anyone, no key. A Turnstile check guards it.
+- Who may call: anyone, no key. A Turnstile check guards it; with no `TURNSTILE_SECRET` set it is skipped only when `ENVIRONMENT=development` and refused 503 everywhere else.
 - In: slug, name, contact_email, phone, first_name, last_name (all required, not blank); middle_name, country_code, turnstile_token, redirect_url, product optional. Optional `Idempotency-Key` header replays the first answer.
 - Out: 201 `DL_TENANT_CREATED`, data id, slug, status, one_time_password, owner_existing, owner_email, payment_url, amount_tzs.
 - Saves: a pending_payment tenant, the owner in identity, a billing checkout; announces `tenant.created`. A stalled earlier signup for the same email resumes.
-- Refuses: 400 `DL_SIGNUP_FIELD_REQUIRED`, `DL_SIGNUP_EMAIL_INVALID`, `DL_SIGNUP_BODY_UNREADABLE`, `DL_SIGNUP_PHONE_INVALID`, `DL_SIGNUP_PHONE_COUNTRY_UNCLEAR`, `DL_TENANT_SLUG_INVALID`; 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`; 409 `DL_TENANT_SLUG_RESERVED`, `DL_TENANT_SLUG_TAKEN`; 503 `DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE`.
+- Refuses: 400 `DL_SIGNUP_FIELD_REQUIRED`, `DL_SIGNUP_EMAIL_INVALID`, `DL_SIGNUP_BODY_UNREADABLE`, `DL_SIGNUP_PHONE_INVALID`, `DL_SIGNUP_PHONE_COUNTRY_UNCLEAR`, `DL_TENANT_SLUG_INVALID`; 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`; 409 `DL_TENANT_SLUG_RESERVED`, `DL_TENANT_SLUG_TAKEN`; 503 `DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE` (Cloudflare unreachable, our secret refused, or no secret set outside development).
 
 ### POST /tenants/v1
 - Handler: Create

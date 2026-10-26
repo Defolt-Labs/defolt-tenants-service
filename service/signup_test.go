@@ -263,7 +263,7 @@ func assertPayloadUnchanged(t *testing.T, l *orderLog, row *model.Tenant) {
 // (a) A health signup.
 func TestHealthSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 	rig := newOrderRig(t, http.StatusCreated)
-	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-health-1"), NewTurnstile(""))
+	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-health-1"), NewTurnstile("", "development"))
 	if err != nil {
 		t.Fatalf("PublicSignup: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestHealthSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 // (b) DRS gets the same order.
 func TestDRSSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 	rig := newOrderRig(t, http.StatusCreated)
-	if _, err := rig.svc.PublicSignup(context.Background(), signupInput("drs", "order-drs-1"), NewTurnstile("")); err != nil {
+	if _, err := rig.svc.PublicSignup(context.Background(), signupInput("drs", "order-drs-1"), NewTurnstile("", "development")); err != nil {
 		t.Fatalf("PublicSignup: %v", err)
 	}
 	assertCreatedAfterOwnerBeforeCheckout(t, rig.log)
@@ -288,7 +288,7 @@ func TestDRSSignupPublishesTenantCreatedAfterOwnerSaved(t *testing.T) {
 // goes out once, after the SaveOwner attempt and before the checkout.
 func TestIdentityFailureStillPublishesOnceAfterSaveOwner(t *testing.T) {
 	rig := newOrderRig(t, http.StatusInternalServerError)
-	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-idfail-1"), NewTurnstile(""))
+	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-idfail-1"), NewTurnstile("", "development"))
 	if err != nil {
 		t.Fatalf("PublicSignup: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestResumedSignupPublishesOnce(t *testing.T) {
 	rig.rows.existing = existing
 	rig.rows.byID[existing.ID] = *existing
 
-	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-resume-1"), NewTurnstile(""))
+	out, err := rig.svc.PublicSignup(context.Background(), signupInput("health", "order-resume-1"), NewTurnstile("", "development"))
 	if err != nil {
 		t.Fatalf("PublicSignup (resume): %v", err)
 	}
