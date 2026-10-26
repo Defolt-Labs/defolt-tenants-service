@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	"defolt-tenants-service/middleware"
 	"defolt-tenants-service/model"
+	"defolt-tenants-service/repository"
 	"defolt-tenants-service/reqid"
 
 	"github.com/gin-gonic/gin"
@@ -489,3 +491,41 @@ func TestApplyUpdateLeavesAnUnchangedPhoneOut(t *testing.T) {
 		t.Fatalf("columns %v err %v, want none", got, err)
 	}
 }
+
+// A reissue for a linked namespace is refused before identity is touched; a missing tenant is still not found.
+func TestReissueOwnerOTPRefusesALinkedNamespace(t *testing.T) {
+	rows := &recordingRows{log: &orderLog{}, byID: map[uuid.UUID]model.Tenant{}}
+	linked := model.Tenant{ID: uuid.New(), Slug: "linked-reissue", Product: "health", OwnerUserID: ptrUUID(uuid.New())}
+	rows.byID[linked.ID] = linked
+	s := &TenantsService{rows: rows}
+	s.UseLinkedOwners([]string{"health"})
+
+	if _, err := s.ReissueOwnerOTP(context.Background(), linked.ID); !errors.Is(err, ErrOwnerLinkElsewhere) {
+		t.Fatalf("linked tenant reissue = %v, want ErrOwnerLinkElsewhere", err)
+	}
+	if _, err := s.ReissueOwnerOTP(context.Background(), uuid.New()); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("unknown tenant reissue = %v, want ErrNotFound", err)
+	}
+}
+
+func TestReissueOwnerOTPStillWorksOutsideTheLinkedNamespaces(t *testing.T) {
+	var reset bool
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reset = r.Method == http.MethodPut || r.Method == http.MethodPost
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer identity.Close()
+	rows := &recordingRows{log: &orderLog{}, byID: map[uuid.UUID]model.Tenant{}}
+	shop := model.Tenant{ID: uuid.New(), Slug: "shop-reissue", Product: "drs", OwnerUserID: ptrUUID(uuid.New())}
+	rows.byID[shop.ID] = shop
+	s := &TenantsService{rows: rows, identity: NewIdentityClient(identity.URL, "k", "test")}
+	s.UseLinkedOwners([]string{"health"})
+
+	otp, err := s.ReissueOwnerOTP(context.Background(), shop.ID)
+	if err != nil || otp == "" || !reset {
+		t.Fatalf("shop reissue = %q, %v, identity reset = %v; want a password and a reset", otp, err, reset)
+	}
+}
+
+func ptrUUID(id uuid.UUID) *uuid.UUID { return &id }

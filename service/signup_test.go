@@ -380,3 +380,38 @@ func TestInternalCreatePublishesImmediately(t *testing.T) {
 	}
 	assertPayloadUnchanged(t, rig.log, rig.rows.inserted)
 }
+
+// A namespace set to link its owner gets no password back; every other namespace still does.
+func TestOwnerPasswordIsReturnedOnlyOutsideTheLinkedNamespaces(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		linked     []string
+		namespace  string
+		wantOTP    bool
+		wantLinked bool
+	}{
+		{"linked namespace gets a link", []string{"health"}, "health", false, true},
+		{"other namespace keeps the password", []string{"health"}, "drs", true, false},
+		{"nothing linked keeps the password", nil, "health", true, false},
+		{"setting is case and space tolerant", []string{" Health "}, "health", false, true},
+		{"a blank namespace means the default one", []string{"health"}, "", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newOrderRig(t, http.StatusCreated)
+			rig.svc.UseLinkedOwners(tc.linked)
+			out, err := rig.svc.PublicSignup(context.Background(), signupInput(tc.namespace, "link-"+uuid.NewString()[:8]), NewTurnstile("", "development"))
+			if err != nil {
+				t.Fatalf("PublicSignup: %v", err)
+			}
+			if got := out.OneTimePassword != ""; got != tc.wantOTP {
+				t.Errorf("one time password present = %v, want %v", got, tc.wantOTP)
+			}
+			if out.OwnerLink != tc.wantLinked {
+				t.Errorf("OwnerLink = %v, want %v", out.OwnerLink, tc.wantLinked)
+			}
+			if out.Tenant == nil || out.Tenant.OwnerUserID == nil {
+				t.Errorf("the owner must still be created in identity: %+v", out.Tenant)
+			}
+		})
+	}
+}

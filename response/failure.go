@@ -142,6 +142,12 @@ var (
 		Meta Meta
 	}{"DL_TENANT_NO_OWNER", Meta{EN: "No owner account could be resolved for this tenant.", SW: "Akaunti ya mmiliki haikupatikana kwa mteja huyu."}}
 
+	// ErrTenantOwnerLinkElsewhere points a reissue at the tenant's own service.
+	ErrTenantOwnerLinkElsewhere = struct {
+		Code string
+		Meta Meta
+	}{"DL_TENANT_OWNER_LINK_ELSEWHERE", Meta{EN: "This owner's password link is sent by the clinic's own system. Ask for a new link there; this route does not issue one.", SW: "Kiungo cha nenosiri la mmiliki huyu hutumwa na mfumo wa kliniki yenyewe. Omba kiungo kipya huko; njia hii haitoi kimoja."}}
+
 	// ErrTenantOwnerRequired rejects health tenant creation without an owner.
 	ErrTenantOwnerRequired = struct {
 		Code string

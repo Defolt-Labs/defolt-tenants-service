@@ -20,13 +20,15 @@ import (
 )
 
 var (
-	ErrSlugInvalid   = errors.New("slug is invalid")
-	ErrSlugReserved  = errors.New("slug is reserved")
-	ErrSlugTaken     = errors.New("slug is taken")
-	ErrValidation    = errors.New("validation failed")
-	ErrNoOwner       = errors.New("tenant has no resolvable owner user")
-	ErrBillingDown   = errors.New("billing service unavailable")
-	ErrOwnerRequired = errors.New("the health product requires an owner on every tenant, and owner_user_id was not given")
+	ErrSlugInvalid  = errors.New("slug is invalid")
+	ErrSlugReserved = errors.New("slug is reserved")
+	ErrSlugTaken    = errors.New("slug is taken")
+	ErrValidation   = errors.New("validation failed")
+	ErrNoOwner      = errors.New("tenant has no resolvable owner user")
+	ErrBillingDown  = errors.New("billing service unavailable")
+	// ErrOwnerLinkElsewhere means the owner's password is issued by the tenant's own service, not here.
+	ErrOwnerLinkElsewhere = errors.New("this tenant's owner password is issued by its own service")
+	ErrOwnerRequired      = errors.New("the health product requires an owner on every tenant, and owner_user_id was not given")
 )
 
 // RequireOwnerForProduct refuses a health tenant created with no owner.
@@ -56,6 +58,25 @@ type TenantsService struct {
 	billing    *BillingClient
 	reserved   map[string]struct{}
 	rootDomain string
+	// linkedOwners are the namespaces whose owner password comes as a link from their own service.
+	linkedOwners map[string]struct{}
+}
+
+// UseLinkedOwners sets the namespaces whose owner gets the first password as a link from the namespace's own service.
+func (s *TenantsService) UseLinkedOwners(namespaces []string) {
+	set := make(map[string]struct{}, len(namespaces))
+	for _, n := range namespaces {
+		if n = NormalizeProduct(n); n != "" {
+			set[n] = struct{}{}
+		}
+	}
+	s.linkedOwners = set
+}
+
+// OwnerByLink reports whether the namespace's owner password is issued by its own service.
+func (s *TenantsService) OwnerByLink(namespace string) bool {
+	_, ok := s.linkedOwners[NormalizeProduct(namespace)]
+	return ok
 }
 
 func New(repo *repository.Repo, nc *nats.Conn, c *cache.Cache, identity *IdentityClient, billing *BillingClient, reserved []string, rootDomain string) *TenantsService {
@@ -439,9 +460,12 @@ func (s *TenantsService) SyncSubscriptionState(ctx context.Context, id uuid.UUID
 
 // ReissueOwnerOTP resets the owner password and updates credentials in identity.
 func (s *TenantsService) ReissueOwnerOTP(ctx context.Context, id uuid.UUID) (string, error) {
-	t, err := s.repo.FindByID(ctx, id)
+	t, err := s.rows.FindByID(ctx, id)
 	if err != nil {
 		return "", err
+	}
+	if s.OwnerByLink(t.Product) {
+		return "", ErrOwnerLinkElsewhere
 	}
 	if t.OwnerUserID == nil {
 		email := t.OwnerEmail

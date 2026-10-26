@@ -302,6 +302,8 @@ func (h *Handlers) ReissueOwnerOTP(c *gin.Context) {
 			response.NotFound(c, response.ErrTenantUnknown.Code, response.ErrTenantUnknown.Meta)
 		case errors.Is(err, service.ErrNoOwner):
 			response.Conflict(c, response.ErrTenantNoOwner.Code, response.ErrTenantNoOwner.Meta, nil)
+		case errors.Is(err, service.ErrOwnerLinkElsewhere):
+			response.Conflict(c, response.ErrTenantOwnerLinkElsewhere.Code, response.ErrTenantOwnerLinkElsewhere.Meta, nil)
 		default:
 			c.Error(err)
 			response.InternalError(c, response.ErrInternal.Code, response.ErrInternal.Meta)
@@ -441,16 +443,26 @@ func (h *Handlers) PublicSignup(c *gin.Context) {
 		writeSignupError(c, err)
 		return
 	}
-	h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, gin.H{
-		"id":                res.Tenant.ID,
-		"slug":              res.Tenant.Slug,
-		"status":            res.Tenant.Status,
-		"one_time_password": res.OneTimePassword,
-		"owner_existing":    res.OwnerExisting,
-		"owner_email":       res.OwnerEmail,
-		"payment_url":       res.PaymentURL,
-		"amount_tzs":        res.AmountTZS,
-	})
+	h.respondCreatedIdempotent(c, response.OKTenantCreated.Code, response.OKTenantCreated.Meta, signupData(res))
+}
+
+// signupData is the sign-up answer body. An owner whose password comes as a link carries no one_time_password key.
+func signupData(res *service.SignupResult) gin.H {
+	data := gin.H{
+		"id":             res.Tenant.ID,
+		"slug":           res.Tenant.Slug,
+		"status":         res.Tenant.Status,
+		"owner_existing": res.OwnerExisting,
+		"owner_email":    res.OwnerEmail,
+		"payment_url":    res.PaymentURL,
+		"amount_tzs":     res.AmountTZS,
+	}
+	if res.OwnerLink {
+		data["owner_link_by_email"] = true
+	} else {
+		data["one_time_password"] = res.OneTimePassword
+	}
+	return data
 }
 
 // Activate handles billing confirmation callback to activate tenant.

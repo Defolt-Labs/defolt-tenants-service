@@ -47,6 +47,9 @@ type Config struct {
 
 	// BillingURL points at defolt-billing-service for registration checkout calls.
 	BillingURL string
+
+	// OwnerLinkNamespaces are the product namespaces whose owner gets the first password as a link from that product's own service, so sign-up returns none.
+	OwnerLinkNamespaces []string
 }
 
 func Load() (*Config, error) {
@@ -103,6 +106,8 @@ func Load() (*Config, error) {
 		DefaultPlatform: envx.String("DEFAULT_PLATFORM", "drs"),
 
 		BillingURL: envx.String("DEFOLT_BILLING_URL", "http://defolt-billing-service:8080"),
+
+		OwnerLinkNamespaces: splitList(envx.String("OWNER_LINK_NAMESPACES", "")),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -117,6 +122,17 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// splitList turns a comma list into lowercase, trimmed, non-blank entries.
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if v := strings.ToLower(strings.TrimSpace(part)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // DeclaredEnvironment is ENVIRONMENT as set, or "" when it was left unset.

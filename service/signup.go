@@ -42,6 +42,8 @@ type SignupResult struct {
 	AmountTZS       int64
 	OwnerExisting   bool
 	OwnerEmail      string
+	// OwnerLink is true when the owner's first password comes as a link from the tenant's own service.
+	OwnerLink bool
 }
 
 // PublicSignup validates captcha, creates tenant, provisions owner, and requests checkout.
@@ -81,7 +83,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		}
 	}
 
-	out := &SignupResult{Tenant: t}
+	out := &SignupResult{Tenant: t, OwnerLink: s.OwnerByLink(t.Product)}
 	t.OwnerEmail = strings.TrimSpace(in.ContactEmail)
 	out.OwnerEmail = t.OwnerEmail
 	t.OwnerFirstName = strings.TrimSpace(in.FirstName)
@@ -103,7 +105,7 @@ func (s *TenantsService) PublicSignup(ctx context.Context, in SignupInput, ts *T
 		} else {
 			applyIdentityOwner(t, identityUserID, identityExisted)
 			out.OwnerExisting = identityExisted
-			if !identityExisted {
+			if !identityExisted && !out.OwnerLink {
 				out.OneTimePassword = identityPassword
 			} else {
 				logger.LogInfo("signup-identity", fmt.Sprintf("tenant=%s: owner already has a Defolt account, keeping their credential", t.ID))

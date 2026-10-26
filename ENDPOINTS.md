@@ -36,8 +36,8 @@ Rules shared by every route, stated once:
 - Handler: PublicSignup
 - Who may call: anyone, no key. A Turnstile check guards it; with no `TURNSTILE_SECRET` set it is skipped only when `ENVIRONMENT=development` is set explicitly and refused 503 everywhere else.
 - In: slug, name, contact_email, phone, first_name, last_name (all required, not blank); middle_name, country_code, turnstile_token, redirect_url, product optional. Optional `Idempotency-Key` header replays the first answer.
-- Out: 201 `DL_TENANT_CREATED`, data id, slug, status, one_time_password, owner_existing, owner_email, payment_url, amount_tzs.
-- Saves: a pending_payment tenant, the owner in identity, a billing checkout; announces `tenant.created`. A stalled earlier signup for the same email resumes.
+- Out: 201 `DL_TENANT_CREATED`, data id, slug, status, one_time_password, owner_existing, owner_email, payment_url, amount_tzs. For a product named in `OWNER_LINK_NAMESPACES` (the owner's first password is a link emailed by that product's own service) there is no `one_time_password` key and `owner_link_by_email` is true instead.
+- Saves: a pending_payment tenant, the owner in identity (with a password nobody is shown when the owner is linked), a billing checkout; announces `tenant.created`. A stalled earlier signup for the same email resumes.
 - Refuses: 400 `DL_SIGNUP_FIELD_REQUIRED`, `DL_SIGNUP_EMAIL_INVALID`, `DL_SIGNUP_BODY_UNREADABLE`, `DL_SIGNUP_PHONE_INVALID`, `DL_SIGNUP_PHONE_COUNTRY_UNCLEAR`, `DL_TENANT_SLUG_INVALID`; 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`; 409 `DL_TENANT_SLUG_RESERVED`, `DL_TENANT_SLUG_TAKEN`; 503 `DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE` (Cloudflare unreachable, our secret refused, or no secret set outside development).
 
 ### POST /tenants/v1
@@ -86,7 +86,7 @@ Rules shared by every route, stated once:
 - In: `id` in the path.
 - Out: 200 `DL_TENANT_OTP_REISSUED`, data one_time_password.
 - Saves: a new owner password in identity.
-- Refuses: 404; 409 `DL_TENANT_NO_OWNER`.
+- Refuses: 404; 409 `DL_TENANT_NO_OWNER`; 409 `DL_TENANT_OWNER_LINK_ELSEWHERE` for a tenant whose product is in `OWNER_LINK_NAMESPACES`, before identity is touched: the reissue is the product's own.
 
 ### POST /tenants/v1/:id/resend-payment-link
 - Handler: ResendPaymentLink
