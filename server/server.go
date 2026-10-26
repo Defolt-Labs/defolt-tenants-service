@@ -78,6 +78,8 @@ func Initialize() (*App, error) {
 	idClient := service.NewIdentityClient(cfg.IdentityURL, cfg.OutboundServiceKey, cfg.DefaultPlatform)
 	billing := service.NewBillingClient(cfg.BillingURL, cfg.OutboundServiceKey)
 	svc := service.New(repo, nc, rc, idClient, billing, cfg.ReservedSlugs, cfg.PublicRootDomain)
+	svc.UseLinkedOwners(cfg.OwnerLinkNamespaces)
+	logger.LogInfo("owner-link", fmt.Sprintf("owner password issued by link for namespaces: %v", cfg.OwnerLinkNamespaces))
 	h := handler.New(svc, ts, rc, cfg.ServiceVersion)
 
 	if cfg.Environment == "production" {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -175,5 +176,27 @@ func TestDeclaredEnvironment(t *testing.T) {
 	}
 	if c.DeclaredEnvironment() != "development" {
 		t.Fatalf("set: declared %q, want development", c.DeclaredEnvironment())
+	}
+}
+
+func TestLoadOwnerLinkNamespaces(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want []string
+	}{
+		{"", nil},
+		{"health", []string{"health"}},
+		{" Health , afya,, ", []string{"health", "afya"}},
+	} {
+		clearKeys(t)
+		t.Setenv("INTERNAL_SERVICE_KEY", "k")
+		t.Setenv("OWNER_LINK_NAMESPACES", tc.raw)
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !reflect.DeepEqual(c.OwnerLinkNamespaces, tc.want) {
+			t.Errorf("OWNER_LINK_NAMESPACES %q = %v, want %v", tc.raw, c.OwnerLinkNamespaces, tc.want)
+		}
 	}
 }

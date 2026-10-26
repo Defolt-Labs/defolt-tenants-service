@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"defolt-tenants-service/middleware"
+	"defolt-tenants-service/model"
 	"defolt-tenants-service/response"
 	"defolt-tenants-service/service"
 
@@ -151,5 +152,24 @@ func TestTheCreatedAnswerCarriesTheRequestID(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &a)
 	if w.Code != 201 || a.RequestID != rid || w.Header().Get(middleware.RequestIDHeader) != rid {
 		t.Fatalf("201 answer: status %d body request_id %q header %q", w.Code, a.RequestID, w.Header().Get(middleware.RequestIDHeader))
+	}
+}
+
+func TestSignupDataOmitsThePasswordForALinkedOwner(t *testing.T) {
+	tenant := &model.Tenant{ID: uuid.New(), Slug: "data-clinic", Status: model.StatusPendingPayment}
+	shop := signupData(&service.SignupResult{Tenant: tenant, OneTimePassword: "pw-1", OwnerEmail: "o@example.com"})
+	if shop["one_time_password"] != "pw-1" {
+		t.Errorf("shop answer one_time_password = %v, want the password", shop["one_time_password"])
+	}
+	if _, ok := shop["owner_link_by_email"]; ok {
+		t.Errorf("shop answer carries owner_link_by_email: %v", shop)
+	}
+
+	linked := signupData(&service.SignupResult{Tenant: tenant, OwnerLink: true, OwnerEmail: "o@example.com"})
+	if _, ok := linked["one_time_password"]; ok {
+		t.Errorf("linked answer carries one_time_password: %v", linked)
+	}
+	if linked["owner_link_by_email"] != true {
+		t.Errorf("linked answer owner_link_by_email = %v, want true", linked["owner_link_by_email"])
 	}
 }

@@ -21,6 +21,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Slug: lowercase letters, digits and hyphens, unique per product; a reserved slug (config `RESERVED_SLUGS`) is refused.
 - Product: the Defolt product namespace (drs, health); slug lookups are scoped by it, default drs.
 - Validation errors name the json field: server wiring calls `hk.RegisterJSONFieldNames()` first, and handler tests call it in `TestMain`.
+- Owner password: a product namespace listed in `OWNER_LINK_NAMESPACES` (config `OwnerLinkNamespaces`, empty by default, set in values.yaml) gets its owner's first password as a link from that product's own service. Sign-up then answers no `one_time_password` (`owner_link_by_email` true), and this service never reissues one. Other products behave as before. The rule reads the setting, never a product name in code.
 - Phone: normalised to international form; an unclear country is refused.
 - Status flow: pending_payment, then active; grace and suspended follow billing; archived hides the tenant from resolve-host.
 - Trial: seven days from activation.
@@ -30,6 +31,7 @@ It does not own sign-in (identity), prices or subscriptions (billing), or any pr
 - Internal routes without a matching `X-Internal-Service-Key`: 401 `DL_FORBIDDEN`. The inbound keys are `INTERNAL_SERVICE_KEYS`, a `name=key,name=key` set, built with the httpkit key set: when it is set only its entries are accepted, else the single key is accepted whole under the name `legacy`. Boot stops on a malformed set, naming the entry by position and never a value. The matched name is stamped on the request.
 - Signup without a passing Turnstile check: 403 `DL_SIGNUP_HUMAN_CHECK_FAILED`.
 - Signup with no `TURNSTILE_SECRET` unless `ENVIRONMENT=development` is set explicitly (unset counts as not development): 503 `DL_SIGNUP_HUMAN_CHECK_UNAVAILABLE` (reason `secret-not-configured`), logged as an error at boot. Only development skips the check; the check never passes by default.
+- Reissuing the owner password of a tenant whose product is in `OWNER_LINK_NAMESPACES`: 409 `DL_TENANT_OWNER_LINK_ELSEWHERE`.
 - The health product refuses a tenant with no owner: 400 `DL_TENANT_OWNER_REQUIRED`.
 - `/ready` pings the database through `hk.Readiness`: 503 `db_unreachable` when it cannot answer in 2 seconds; `/health` stays a plain liveness answer.
 - Every refusal carries English and Kiswahili text.
